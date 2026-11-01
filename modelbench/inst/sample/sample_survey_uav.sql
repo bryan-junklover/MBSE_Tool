@@ -192,7 +192,7 @@ INSERT INTO requirement (id, parent_id, level, sort_order, short_title, text, re
 -- Drafts (failing the gate, or holding placeholders)
 INSERT INTO requirement (id, parent_id, level, sort_order, short_title, text, req_type, status, gate_score, gate_pass) VALUES
  ('SYS-003',NULL,'system',7,'Reliable','The system should be reliable.','nfr','draft',0,0),
- ('SYS-007','STK-002','system',8,'Lightweight, portable','The system shall be lightweight and easy to transport.','physical','draft',30,0),
+ ('SYS-007','STK-002','system',8,'Lightweight, portable','The system shall be lightweight and easy to transport.','physical','draft',20,0),
  ('SYS-031','SYS-001','subsystem',1,'Battery temperature','The power system shall maintain battery cell temperature between [X] °C and [Y] °C during flight.','performance','draft',100,0);
 
 INSERT INTO requirement (id, parent_id, level, sort_order, short_title, text, req_type, status, gate_score, gate_pass, origin, review_state) VALUES

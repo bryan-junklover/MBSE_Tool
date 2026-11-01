@@ -255,7 +255,7 @@ new tables) and then any pending migrations. Never edit a released migration.
 ## 10. Sample project facts (used by tests)
 
 From `sample_survey_uav.sql` (the working copy, after the battery change). Stored gate
-scores are what the Coach gate computes with no glossary penalty:
+scores are what `check_requirement()` computes, and a test keeps them in step:
 
 | Check | Expected |
 |---|---|

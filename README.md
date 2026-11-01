@@ -1,6 +1,6 @@
 # ModelBench
 
-Start with [BUILD_PLAN.md](BUILD_PLAN.md). The core package is in `modelbench/`.
+Start with [BUILD_PLAN.md](BUILD_PLAN.md). The core package is in `modelbench/` and the Shiny shell in `app/`.
 
 ```bash
 Rscript tools/run_tests.R
@@ -12,4 +12,8 @@ Rscript tools/lint.R
 
 ```bash
 Rscript tools/build_sample_project.R survey_uav.sqlite
+```
+
+```bash
+Rscript -e 'shiny::runApp("app")'
 ```

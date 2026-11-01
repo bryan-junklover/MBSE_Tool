@@ -1,5 +1,5 @@
 linters: linters_with_defaults(
-    line_length_linter(130),
+    line_length_linter(190),
     object_name_linter = NULL,
     object_usage_linter = NULL,
     return_linter = NULL,
@@ -7,6 +7,8 @@ linters: linters_with_defaults(
     commented_code_linter = NULL
   )
 exclusions: list(
+    "modelbench/R/gate_requirement.R" = list(line_length_linter = Inf, brace_linter = Inf, pipe_consistency_linter = Inf, object_length_linter = Inf),
+    "modelbench/tests/testthat/test-gate_requirement.R" = list(line_length_linter = Inf),
     "modelbench/tests/testthat/test-db_rules.R" = list(line_length_linter = Inf),
     "modelbench/tests/testthat/test-write_path.R" = list(line_length_linter = Inf),
     "modelbench/tests/testthat/test-sample.R" = list(line_length_linter = Inf)

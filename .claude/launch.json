@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "modelbench",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "MODELBENCH_WORKSPACE_DIR=/tmp/modelbench_preview Rscript -e 'shiny::runApp(\"app\", port = 7788, launch.browser = FALSE)'"],
+      "port": 7788
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+When a mouse enters the capture chamber, the trap shall close the entry door within 2 seconds.
+When the release mechanism is activated, the trap shall open the capture door within 1 second.
+The trap door shall support a load of at least 2 kg without deforming.
+The trap shall maintain rodent containment for a minimum of 24 hours after capture.
+The bait compartment cap shall remain sealed under a pull force of at least 5 kg.
+The trap shall achieve a customer satisfaction rating of at least 90% in post-purchase surveys.
+When stored for more than 6 months, the trap shall retain at least 95% of its original locking force.
+The trap shall limit manufacturing scrap rate to no more than 2% of total units produced.
+The trap shall complete a full capture-and-reset cycle within 10 seconds of manual reset.
+When ambient humidity exceeds 90%, the trap shall maintain bait compartment seal integrity.
+The trap should be really easy and user-friendly to clean.
+The trap shall optimize mouse capture rates.
+The user shall be able to quickly release the captured mouse outdoors.
+The trap shall detect the mouse and shall notify the user.
+The trap shall be safe.
+When the chamber door closes, the trap shall prevent the mouse from
+The trap shall have a robust locking mechanism to prevent tampering by pets.
+The release slider should move smoothly without sticking.
+The trap shall lock the entry door reliably.

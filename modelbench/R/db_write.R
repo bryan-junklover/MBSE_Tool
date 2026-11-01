@@ -13,7 +13,12 @@ in_tx <- function(con, code) {
 
 allocate_id <- function(con, prefix) {
   format <- ID_FORMATS[prefix]
-  if (is.na(format)) stop("Unknown id prefix: ", prefix, call. = FALSE)
+  if (is.na(format)) {
+    custom <- DBI::dbGetQuery(con, "SELECT value FROM project_meta WHERE key LIKE 'id_prefix_%' AND value = ?",
+                              params = list(prefix))
+    if (nrow(custom) == 0L) stop("Unknown id prefix: ", prefix, call. = FALSE)
+    format <- paste0(prefix, "-%03d")
+  }
   in_tx(con, {
     DBI::dbExecute(con, "INSERT OR IGNORE INTO id_counter (prefix, next_num) VALUES (?, 1)", params = list(prefix))
     num <- DBI::dbGetQuery(con, "SELECT next_num FROM id_counter WHERE prefix = ?", params = list(prefix))$next_num
@@ -47,7 +52,16 @@ polymorphic_exists <- function(con, kind, id) {
 }
 
 # Rules the database can't express (SCHEMA §5). `row` is the row as it would be.
-validate_entity <- function(con, kind, id, row) {
+validate_entity <- function(con, kind, id, row, existing = NULL) {
+  # Commit re-runs the gate in core. A committed requirement whose text isn't
+  # changing keeps its standing, so a later model edit can't lock its details.
+  if (kind == "requirement" && identical(row$status, "committed") &&
+      (is.null(existing) || !identical(existing$status, "committed") || !identical(existing$text, row$text))) {
+    gate <- check_requirement(row$text, model_terms(con))
+    if (!gate$passes_gate) {
+      refuse("Can't commit ", id, ": ", paste(gate_blockers(gate), collapse = " "))
+    }
+  }
   if (kind %in% c("element", "requirement") && !is.null(row$parent_id) && !is.na(row$parent_id) &&
       parent_chain_has(con, kind, row$parent_id, id)) {
     refuse("Can't save ", id, ": its parent ", row$parent_id, " would make a cycle.")
@@ -105,13 +119,13 @@ write_entity <- function(con, kind, id = NULL, fields = list(), author = "engine
 
   in_tx(con, {
     if (is.null(change_set)) change_set <- new_change_set(con)
-    if (is.null(id)) id <- allocate_id(con, entity_prefix(kind, fields))
+    if (is.null(id)) id <- allocate_id(con, entity_prefix(con, kind, fields))
     key <- entity_key_values(kind, id)
     if (length(intersect(names(key), names(fields))) > 0L) stop("Key columns can't be changed", call. = FALSE)
 
     existing <- read_entity(con, kind, id)
     merged <- if (is.null(existing)) c(key, fields) else utils::modifyList(existing, fields, keep.null = TRUE)
-    validate_entity(con, kind, id, merged)
+    validate_entity(con, kind, id, merged, existing)
 
     if (is.null(existing)) {
       insert <- c(key, fields, list(rev = next_rev_after_delete(con, kind, id)))
@@ -250,6 +264,47 @@ write_plain <- function(con, table, fields) {
                               paste(vapply(names(fields), quote_ident, "", con = con), collapse = ", "),
                               paste(rep("?", length(fields)), collapse = ", ")),
                  params = unname(fields))
+  invisible(NULL)
+}
+
+set_setting <- function(con, key, value) {
+  DBI::dbExecute(con, "INSERT INTO project_meta (key, value) VALUES (?, ?)
+                       ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                 params = list(key, as.character(value)))
+  invisible(NULL)
+}
+
+upsert_glossary <- function(con, term, definition = NULL, element_id = NULL) {
+  DBI::dbExecute(con, "INSERT INTO glossary (term, definition, element_id) VALUES (?, ?, ?)
+                       ON CONFLICT (term) DO UPDATE SET definition = excluded.definition, element_id = excluded.element_id",
+                 params = null_to_na(list(term, definition, element_id)))
+  invisible(NULL)
+}
+
+delete_glossary <- function(con, term) {
+  DBI::dbExecute(con, "DELETE FROM glossary WHERE term = ?", params = list(term))
+  invisible(NULL)
+}
+
+# Replaces how a requirement's terms resolved. Derived from the gate, so not revisioned.
+write_requirement_terms <- function(con, requirement_id, terms) {
+  DBI::dbExecute(con, "DELETE FROM requirement_term WHERE requirement_id = ?", params = list(requirement_id))
+  for (i in seq_len(nrow(terms))) {
+    DBI::dbExecute(con, "INSERT INTO requirement_term (requirement_id, term, role, resolution, element_id) VALUES (?, ?, ?, ?, ?)",
+                   params = list(requirement_id, terms$term[i], terms$role[i], terms$resolution[i], terms$element_id[i]))
+  }
+  invisible(NULL)
+}
+
+insert_triage_row <- function(con, source_name, row_no, raw_text, raw_json, gate_json) {
+  DBI::dbExecute(con, "INSERT INTO import_triage (source_name, row_no, raw_text, raw_json, gate_json) VALUES (?, ?, ?, ?, ?)",
+                 params = list(source_name, row_no, raw_text, raw_json, gate_json))
+  invisible(NULL)
+}
+
+update_triage_row <- function(con, id, status, requirement_id = NULL) {
+  DBI::dbExecute(con, "UPDATE import_triage SET status = ?, requirement_id = ? WHERE id = ?",
+                 params = null_to_na(list(status, requirement_id, id)))
   invisible(NULL)
 }
 

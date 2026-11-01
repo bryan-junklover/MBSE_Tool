@@ -58,13 +58,24 @@ entity_key_values <- function(kind, id) {
   stats::setNames(as.list(parts), cols)
 }
 
+# Prefixes the engineer can change in Project settings, with their defaults.
+CONFIGURABLE_PREFIXES <- c(stakeholder = "STK", system = "SYS", subsystem = "SYS", component = "C")
+
+# The prefix in force for a configurable id, from project_meta or the default.
+configured_prefix <- function(con, what) {
+  stored <- DBI::dbGetQuery(con, "SELECT value FROM project_meta WHERE key = ?",
+                            params = list(paste0("id_prefix_", what)))$value
+  if (length(stored) == 1L) stored else unname(CONFIGURABLE_PREFIXES[[what]])
+}
+
 # The id prefix for a new entity. Elements and requirements depend on their fields.
-entity_prefix <- function(kind, fields) {
+entity_prefix <- function(con, kind, fields) {
   if (kind == "element") {
-    return(switch(fields$kind, component = "C", `function` = "F", external = "EXT"))
+    return(switch(fields$kind, component = configured_prefix(con, "component"), `function` = "F", external = "EXT"))
   }
   if (kind == "requirement") {
-    return(if (identical(fields$level, "stakeholder")) "STK" else "SYS")
+    level <- if (is.null(fields$level)) "system" else fields$level
+    return(configured_prefix(con, level))
   }
   prefix <- ENTITY_PREFIXES[kind]
   if (is.na(prefix)) stop(kind, " has a composite key, so it needs an explicit id", call. = FALSE)

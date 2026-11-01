@@ -1,0 +1,3 @@
+# ModelBench: the thin Shiny shell. All logic lives in the modelbench package.
+if (dir.exists("../modelbench")) pkgload::load_all("../modelbench", quiet = TRUE) else library(modelbench)
+shiny::shinyApp(app_ui(), app_server)

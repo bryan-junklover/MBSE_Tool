@@ -64,8 +64,10 @@ build_sample_project <- function(path) {
         fields <- sample_bl03_overrides(kind, id, sample_row_fields(kind, rows[i, , drop = FALSE]))
         write_entity(con, kind, id, fields, author, "Sample project, BL-03 form", change_set)
       }
+      # Committing a requirement re-runs the gate, which reads the aliases.
+      if (kind == "element") sample_copy_plain(con, source, "glossary")
     }
-    for (table in c("glossary", "llm_call", "ai_proposal")) sample_copy_plain(con, source, table)
+    for (table in c("llm_call", "ai_proposal")) sample_copy_plain(con, source, table)
 
     write_verification_record(con, "SYS-001", "TC-007", "pass", author, evidence_ref = "FT-2026-09-30",
                               note = "37.2 min measured", id = "VR-0001")

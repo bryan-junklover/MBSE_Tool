@@ -1,0 +1,12 @@
+:root {
+  --ground: #F4F4F2; --surface: #FFFFFF; --surface-muted: #ECEDEF; --canvas: #FAFAF9;
+  --ink: #1C1D1F; --ink-2: #45484D; --ink-3: #5B5E63; --ink-on-dark: #C9CCD1; --ink-on-dark-muted: #B9BCC2;
+  --line: #D4D5D8; --line-strong: #9A9DA3; --line-control: #85888E; --edge: #6B6E74;
+  --topbar-bg: #1C1D1F; --topbar-active: #3A3C40; --status-bg: #2A2C30;
+  --ai: #2F5BD3; --ai-text: #1E3F9E; --ai-tint: #EAF0FD; --ai-border: #B8C9F2;
+  --gap-text: #8A4500; --gap-tint: #FFF3E3; --gap-border: #E8B77A; --gap-stroke: #B35A00; --gap-strong: #6E3600; --gap-fill: #FFDDB0;
+  --radius: 4px; --radius-inner: 3px; --radius-chip: 10px; --radius-state: 20px; --radius-action: 16px;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px;
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+}

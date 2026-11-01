@@ -147,7 +147,9 @@ Artboards: *0 · Write*, *3 · Write › Specification*.
   with its tests and the `sample_requirements.txt` fixture (10 pass, 9 fail).
   Replace the "actor not in glossary" check with **term resolution**: the actor
   and noun phrases are matched against element names and glossary aliases.
-  Matching is case-insensitive and ignores articles and plurals.
+  Matching is case-insensitive and ignores articles and plurals. An actor the model
+  doesn't know costs 10 points, as the glossary check did, but never blocks; marking
+  it "Not a model term" removes the penalty.
 - Write screen:
   - text area and EARS builder;
   - parsed sentence;
@@ -318,6 +320,11 @@ Artboards: *11* (chat panel), plus export buttons wherever they appear.
 - **Trigger the coach observer on the draft text only,** never on gate output. The
   gate depends on database state, and triggering on its output caused an infinite
   loop in the Coach.
+- **A click carries the words on screen.** Shiny holds text input back 250 ms, so at
+  the moment of a click the server can still have older text. Commit and Save send
+  the text area's value with the click, and core gates and saves that. When the coach
+  arrives, `commit_requirement()` must also check `assessed_text` against this text
+  in core, not only in the button's state.
 - **`debounce()` doesn't dedupe by value.** Keep a `last_processed` guard keyed
   on project and text.
 - **No key, no lockout.** Without a configured coach, commit runs on the gate
