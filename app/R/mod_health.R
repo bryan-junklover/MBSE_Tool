@@ -33,7 +33,7 @@ blocker_target <- function(kind, id, owner_kind = NA, owner_id = NA) {
   list(place = "behavior", id = id)
 }
 
-render_health <- function(health, input_id) {
+render_health <- function(health, input_id, next_id = "The next baseline") {
   blockers <- health$blockers
   count <- nrow(blockers$placeholders) + nrow(blockers$unreviewed) + nrow(blockers$stale)
   place_links <- lapply(seq_len(nrow(blockers$placeholders)), function(i) {
@@ -63,7 +63,7 @@ render_health <- function(health, input_id) {
     } else {
       shiny::tags$section(
         class = "mb-banner",
-        shiny::tags$div(class = "mb-head", shiny::tags$h1("The next baseline can't be created yet"),
+        shiny::tags$div(class = "mb-head", shiny::tags$h1(sprintf("%s can't be created yet", next_id)),
                         shiny::tags$span(class = "mb-gap", style = "font-weight:500", sprintf("%d blockers", count)),
                         shiny::tags$span(class = "mb-caption", "A baseline only holds what an engineer decided.")),
         shiny::tags$div(class = "mb-banner-groups",
@@ -135,7 +135,7 @@ mod_health_server <- function(id, state) {
       input$recompute
       model_health(con())
     })
-    output$page <- shiny::renderUI(render_health(health(), ns("go")))
+    output$page <- shiny::renderUI(render_health(health(), ns("go"), next_baseline_id(con())))
 
     shiny::observeEvent(input$go, {
       target <- input$go

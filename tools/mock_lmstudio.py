@@ -28,7 +28,14 @@ class Handler(BaseHTTPRequestHandler):
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         time.sleep(DELAY)
         text = json.dumps(request.get("messages", ""))
-        answer = GAPS if "what a system model is missing" in text else COACH
+        answer = COACH
+        if "what a system model is missing" in text: answer = GAPS
+        elif "how much a change matters" in text:
+            answer = {"ratings": [{"n": "I1", "significance": "High", "reason": "Mock answer."}, {"n": "I2", "significance": "Medium", "reason": "Mock answer."}]}
+        elif "explain a change to a system model" in text:
+            answer = {"technical": "SYS-001 misses its limit: 31 / 35 min. Re-run TC-007, down 16 percent.", "stakeholder": "The smaller battery on C-003 means about 31 minutes in the air, not 35.", "decision": "Keep the current battery, or accept shorter missions."}
+        elif "people who aren't engineers" in text:
+            answer = {"paragraph": "A quadcopter that photographs an area from a planned route. A few items are still open.", "summaries": []}
         self.send_json({"id": "x", "object": "chat.completion", "model": "mock-model", "choices": [{"index": 0, "finish_reason": "stop",
                         "message": {"role": "assistant", "content": json.dumps(answer)}}], "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}})
 

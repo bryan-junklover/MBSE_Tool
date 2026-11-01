@@ -61,23 +61,32 @@ word_diff <- function(old, new) {
   data.frame(word = words, op = ops, stringsAsFactors = FALSE)
 }
 
+# Replaces any number not on the allowed list with [value], keeping the punctuation after it.
+replace_unknown_numbers <- function(text, allowed, keep_tokens = character(0)) {
+  allowed <- sub("\\.$", "", allowed)
+  tokens <- strsplit(text, "(?<=\\s)|(?=\\s)", perl = TRUE)[[1]]
+  count <- 0L
+  for (i in seq_along(tokens)) {
+    # An id or a name from the model isn't a number the model made up.
+    if (gsub("^[[:punct:]]+|[[:punct:]]+$", "", tokens[i]) %in% keep_tokens) next
+    found <- regmatches(tokens[i], gregexpr("[0-9][0-9.]*", tokens[i]))[[1]]
+    if (length(found) > 0L && !all(sub("\\.$", "", found) %in% allowed)) {
+      ending <- regmatches(tokens[i], regexpr("[[:punct:]]+$", tokens[i]))
+      tokens[i] <- paste0("[value]", if (length(ending) == 1L) ending else "")
+      count <- count + 1L
+    }
+  }
+  list(text = paste(tokens, collapse = ""), count = count)
+}
+
 # An example rewrite: numbers not in the draft become [value], then it's re-gated. A
 # placeholder is expected in an example, so only other failures hide it. It's never
 # repaired automatically (handoff §5.2).
 check_example_rewrite <- function(draft, example, dictionary = EMPTY_TERMS) {
   if (!nzchar(trimws(example))) return(list(status = "none", invented = 0L))
-  draft_numbers <- regmatches(draft, gregexpr("[0-9][0-9.]*", draft))[[1]]
-  tokens <- strsplit(example, "(?<=\\s)|(?=\\s)", perl = TRUE)[[1]]
-  invented <- 0L
-  for (i in seq_along(tokens)) {
-    found <- regmatches(tokens[i], gregexpr("[0-9][0-9.]*", tokens[i]))[[1]]
-    if (length(found) > 0L && !all(sub("\\.$", "", found) %in% sub("\\.$", "", draft_numbers))) {
-      ending <- regmatches(tokens[i], regexpr("[[:punct:]]+$", tokens[i]))
-      tokens[i] <- paste0("[value]", if (length(ending) == 1L) ending else "")
-      invented <- invented + 1L
-    }
-  }
-  text <- paste(tokens, collapse = "")
+  checked <- replace_unknown_numbers(example, regmatches(draft, gregexpr("[0-9][0-9.]*", draft))[[1]])
+  text <- checked$text
+  invented <- checked$count
   gate <- check_requirement(text, dictionary)
   reasons <- gate_blockers(gate)
   reasons <- reasons[!grepl("Contains a placeholder", reasons, fixed = TRUE)]

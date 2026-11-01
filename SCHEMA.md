@@ -226,7 +226,10 @@ evidence becomes current. On the sample project TC-007 is stale because `V-0013`
 ## 8. Impact traversal (deterministic)
 
 `impact_set(changes, max_hops = 3)` walks an igraph built from the tables. Edge
-types, followed in both directions unless marked:
+types are followed in both directions, except that a change flows one way out of a
+property value (to its owner, roll-ups and analyses), out of a roll-up or analysis, and out of
+an interface to what uses it. Otherwise a mass change would come back through the budget to
+every other mass:
 
 | From | Edge | To |
 |---|---|---|

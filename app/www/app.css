@@ -148,3 +148,20 @@ select.mb-table-input { min-width: 92px; }
 .mb-cell:disabled { cursor: default; }
 .mb-draft-row { background: var(--surface-muted); }
 .mb-row-selected { outline: 2px solid var(--ink); outline-offset: -2px; }
+
+/* Baselines and stakeholder view */
+.mb-card-select { width: 100%; font: inherit; display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); text-align: left; cursor: pointer; color: var(--ink); }
+.mb-card-select[aria-current="true"] { border: 2px solid var(--ink); }
+.mb-sig-high { color: var(--gap-text); font-weight: 600; }
+.mb-sig-medium { font-weight: 500; }
+.mb-status-chip { align-self: flex-start; font-size: 12px; padding: 2px 8px; border-radius: var(--radius-chip); }
+.chip-designed { background: var(--ink); color: #FFFFFF; }
+.chip-in_progress { background: var(--surface-muted); }
+.chip-decision_needed, .chip-open_question { background: var(--gap-tint); color: var(--gap-text); border: 1px solid var(--gap-border); }
+.chip-not_started { background: var(--surface); border: 1px dashed var(--line-strong); color: var(--ink-2); }
+.mb-meter-track { height: 10px; background: var(--surface-muted); border-radius: 5px; overflow: hidden; }
+.mb-meter-fill { height: 10px; background: var(--ink-2); }
+.mb-meter-fill.fail { background: var(--gap-stroke); }
+.mb-parts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 12px; }
+.mb-page-grid { display: flex; flex-wrap: wrap; gap: 24px; padding: 24px; align-items: flex-start; }
+.mb-narrative p { margin: 0 0 10px; max-width: 80ch; line-height: 1.55; }

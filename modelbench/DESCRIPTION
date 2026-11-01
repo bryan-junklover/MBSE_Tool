@@ -11,6 +11,7 @@ Imports:
     digest,
     ellmer,
     httr2,
+    igraph,
     keyring,
     promises,
     jsonlite,
@@ -19,6 +20,7 @@ Imports:
     stringr,
     utils
 Suggests:
+    chromote,
     later,
     openxlsx2,
     pkgload,

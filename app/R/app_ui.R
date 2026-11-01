@@ -60,7 +60,8 @@ app_ui <- function() {
             bslib::nav_panel_hidden("Structure", mod_model_ui("model")),
             bslib::nav_panel_hidden("Flows", mod_model_ui("flows", "flows")),
             bslib::nav_panel_hidden("Functional", mod_model_ui("functional", "functional")),
-            bslib::nav_panel_hidden("Interfaces", mod_interfaces_ui("interfaces"))
+            bslib::nav_panel_hidden("Interfaces", mod_interfaces_ui("interfaces")),
+            bslib::nav_panel_hidden("Stakeholder", mod_stakeholder_ui("stakeholder"))
           )
         ),
         bslib::nav_panel_hidden("Behavior", phase_placeholder("The behavior workspace", 6L)),
@@ -71,7 +72,7 @@ app_ui <- function() {
             id = "analyze_tab", selected = "Health",
             bslib::nav_panel_hidden("Health", mod_health_ui("health")),
             bslib::nav_panel_hidden("Review queue", mod_review_ui("review")),
-            bslib::nav_panel_hidden("Baselines & impact", phase_placeholder("Baselines and impact", 5L))
+            bslib::nav_panel_hidden("Baselines & impact", mod_baselines_ui("baselines"))
           )
         )
       )
@@ -81,17 +82,27 @@ app_ui <- function() {
 
 WORKSPACE_TABS <- list(
   Write = c("Draft", "Specification", "Traceability"),
-  Model = c("Structure", "Flows", "Functional", "Interfaces"),
+  Model = c("Structure", "Flows", "Functional", "Interfaces", "Stakeholder"),
   Analyze = c("Health", "Review queue", "Baselines & impact")
 )
 TAB_SETS <- c(Write = "write_tab", Model = "model_tab", Analyze = "analyze_tab")
 
 render_tab_bar <- function(workspace, active) {
-  shiny::tags$div(role = "tablist", `aria-label` = workspace, class = "mb-segmented", lapply(WORKSPACE_TABS[[workspace]], function(tab) {
+  tabs <- setdiff(WORKSPACE_TABS[[workspace]], "Stakeholder")
+  bar <- shiny::tags$div(role = "tablist", `aria-label` = workspace, class = "mb-segmented", lapply(tabs, function(tab) {
     on <- tolower(as.character(identical(tab, active)))
     shiny::tags$button(type = "button", role = "tab", `aria-pressed` = on, `aria-selected` = on,
                        onclick = event_js("nav_click", list(workspace = workspace, tab = tab)), tab)
   }))
+  if (workspace != "Model") return(bar)
+  # The audience toggle: Stakeholder swaps the whole view for a plain one.
+  stakeholder <- identical(active, "Stakeholder")
+  audience <- function(label, on, tab) {
+    shiny::tags$button(type = "button", `aria-pressed` = tolower(as.character(on)), onclick = event_js("nav_click", list(workspace = "Model", tab = tab)), label)
+  }
+  shiny::tags$div(style = "display:flex;flex-wrap:wrap;gap:8px 16px", if (!stakeholder) bar,
+                  shiny::tags$div(role = "group", `aria-label` = "Audience", class = "mb-segmented",
+                                  audience("Engineer", !stakeholder, "Structure"), audience("Stakeholder", stakeholder, "Stakeholder")))
 }
 
 app_server <- function(input, output, session) {
@@ -167,5 +178,7 @@ app_server <- function(input, output, session) {
   mod_interfaces_server("interfaces", state)
   mod_health_server("health", state)
   mod_review_server("review", state)
+  mod_baselines_server("baselines", state)
+  mod_stakeholder_server("stakeholder", state)
   mod_ai_settings_server("ai_settings", state)
 }
