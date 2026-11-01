@@ -1,0 +1,14 @@
+linters: linters_with_defaults(
+    line_length_linter(130),
+    object_name_linter = NULL,
+    object_usage_linter = NULL,
+    return_linter = NULL,
+    indentation_linter = NULL,
+    commented_code_linter = NULL
+  )
+exclusions: list(
+    "modelbench/tests/testthat/test-db_rules.R" = list(line_length_linter = Inf),
+    "modelbench/tests/testthat/test-write_path.R" = list(line_length_linter = Inf),
+    "modelbench/tests/testthat/test-sample.R" = list(line_length_linter = Inf)
+  )
+encoding: "UTF-8"

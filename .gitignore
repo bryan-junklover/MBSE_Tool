@@ -1,0 +1,11 @@
+.Rhistory
+.RData
+.Rproj.user/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.DS_Store
+modelbench/tests/testthat/_snaps/
+renv/library/
+renv/staging/
+renv/local/

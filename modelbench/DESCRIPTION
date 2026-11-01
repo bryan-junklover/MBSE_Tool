@@ -1,0 +1,18 @@
+Package: modelbench
+Title: Requirements-First Model-Based Systems Engineering Core
+Version: 0.0.0.9000
+Authors@R: person("ModelBench", "Developers", role = c("aut", "cre"), email = "noreply@example.com")
+Description: All logic for the ModelBench app: project storage, the write path,
+    gates, analyses and AI plumbing. It has no reactive dependencies.
+License: file LICENSE
+Encoding: UTF-8
+Imports:
+    DBI,
+    digest,
+    jsonlite,
+    RSQLite
+Suggests:
+    ellmer,
+    testthat (>= 3.0.0),
+    withr
+Config/testthat/edition: 3
