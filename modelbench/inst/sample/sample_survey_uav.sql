@@ -176,7 +176,11 @@ INSERT INTO property_value (id, owner_kind, owner_id, property_def_id, value_sta
  ('V-0101','connector','K-0005','PD-002','set',8,'W'),
  ('V-0102','connector','K-0006','PD-002','set',380,'W'),
  ('V-0103','connector','K-0009','PD-002','set',12,'W'),
- ('V-0104','connector','K-0010','PD-002','set',12,'W');
+ ('V-0104','connector','K-0010','PD-002','set',12,'W'),
+ ('V-0105','connector','K-0005','PD-007','set',28,'V'),
+ ('V-0106','connector','K-0006','PD-007','set',28,'V'),
+ ('V-0107','connector','K-0009','PD-007','set',28,'V'),
+ ('V-0108','connector','K-0010','PD-007','set',28,'V');
 
 -- Requirements
 INSERT INTO requirement (id, parent_id, level, sort_order, short_title, text, req_type, status, verification_method, actor_element_id, gate_score, gate_pass, coach_state) VALUES
@@ -384,7 +388,7 @@ INSERT INTO ai_proposal (id, task, proposal_kind, source, target_kind, target_id
 INSERT INTO id_counter (prefix, next_num) VALUES
  ('STK',4),('SYS',32),('C',11),('F',9),('EXT',3),('IF',18),('FLD',11),('P',46),('K',22),('PD',10),('STY',5),('ST',20),
  ('SC',5),('SM',2),('E',12),('T',12),('VAR',4),('LL',14),('A',2),('N',9),('G',10),
- ('TC',8),('VR',2),('BL',4),('PR',6),('L',310),('V',105),('B',3);
+ ('TC',8),('VR',2),('BL',4),('PR',6),('L',310),('V',109),('B',3);
 
 -- Changes since BL-03 (applied by tools/build_sample_project.R through the write path):
 --   1. One change set: V-0013 battery_capacity 5000 -> 4200 mAh and V-0003 Power System mass 1.47 -> 1.36 kg

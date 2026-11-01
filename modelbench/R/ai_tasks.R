@@ -72,6 +72,24 @@ run_gaps <- function(con, task = "gap_inference", focus = NULL) {
   result
 }
 
+# Trace and allocation questions, over numbered candidates ranked locally.
+run_link_coach_async <- function(con, target_kind, target_id) {
+  safely_async(function() {
+    prompt <- link_coach_prompt(con, target_kind, target_id)
+    promises::then(run_ai_async(con, prompt, prompt$target), function(result) {
+      if (DBI::dbIsValid(con) && isTRUE(result$ok)) result$proposal_ids <- store_link_answer(con, prompt, result)
+      result
+    })
+  })
+}
+
+run_link_coach <- function(con, target_kind, target_id) {
+  prompt <- link_coach_prompt(con, target_kind, target_id)
+  result <- run_ai(con, prompt, prompt$target)
+  if (isTRUE(result$ok)) result$proposal_ids <- store_link_answer(con, prompt, result)
+  result
+}
+
 # --- The review queue ---
 
 proposal_list <- function(con, status = "open", sources = c("ai", "structural")) {

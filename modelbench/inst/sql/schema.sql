@@ -544,7 +544,9 @@ INSERT OR IGNORE INTO view_def (id, name, view_kind, filter_json, is_builtin) VA
  ('VW-all', 'All components', 'structure', '{"kinds":["component"]}', 1),
  ('VW-budget', 'Power & mass budget', 'structure', '{"kinds":["component"],"property":{"name":"mass","op":">","value":0}}', 1),
  ('VW-software', 'Software only', 'structure', '{"kinds":["component"],"stereotypes":["SW"]}', 1),
- ('VW-trl', 'TRL below 6', 'structure', '{"kinds":["component"],"property":{"name":"trl","op":"<","value":6}}', 1);
+ ('VW-trl', 'TRL below 6', 'structure', '{"kinds":["component"],"property":{"name":"trl","op":"<","value":6}}', 1),
+ ('VW-flows', 'Flows', 'flows', '{"kinds":["component","external"]}', 1),
+ ('VW-functional', 'Functional', 'functional', NULL, 1);
 
 CREATE TABLE IF NOT EXISTS layout (
   view_id    TEXT NOT NULL REFERENCES view_def(id) ON DELETE CASCADE,

@@ -114,3 +114,87 @@ related_requirements <- function(draft, committed, limit = 40L) {
   }, 0)
   committed[utils::head(order(-score), limit)]
 }
+
+LINK_SCHEMA <- s_object(items = s_array(s_object(
+  question = s_string(),
+  candidates = s_array(s_object(handle = s_string(), why = s_string()))
+)))
+
+# Scores components against a text: rare shared words count most, then shared interfaces,
+# the same parent, and components already holding related functions (handoff §5.3).
+rank_candidates <- function(con, target_text, target_kind, target_id = NULL, k = 10L) {
+  root <- default_structure_root(con)
+  elements <- DBI::dbGetQuery(con, "SELECT id, name, description, parent_id FROM element WHERE kind = 'component' ORDER BY sort_order, name")
+  elements <- elements[!elements$id %in% root, , drop = FALSE]
+  if (nrow(elements) == 0L) return(data.frame(n = character(0), kind = character(0), id = character(0), name = character(0), summary = character(0), score = numeric(0)))
+  texts <- DBI::dbGetQuery(con, "SELECT l.target_id, r.text FROM link l JOIN requirement r ON r.id = l.source_id WHERE l.link_type = 'satisfied_by'")
+  ports <- DBI::dbGetQuery(con, "SELECT p.element_id, p.direction, i.name, i.id AS interface_id FROM port p JOIN interface i ON i.id = p.interface_id")
+  words_of <- function(text) unique(singular_word(setdiff(term_tokens(text), c(TERM_DETERMINERS, TERM_STOP_WORDS, "shall", ",", ".", ";", ":", "(", ")"))))
+  documents <- lapply(seq_len(nrow(elements)), function(i) {
+    row <- elements[i, ]
+    words_of(paste(c(row$name, row$description[!is.na(row$description)], texts$text[texts$target_id == row$id], ports$name[ports$element_id == row$id]), collapse = " "))
+  })
+  frequency <- table(unlist(documents))
+  target_words <- words_of(target_text)
+  score <- vapply(documents, function(words) {
+    shared <- intersect(words, target_words)
+    if (length(shared) == 0L) 0 else sum(log(1 + nrow(elements) / as.numeric(frequency[shared])))
+  }, 0)
+  linked <- character(0)
+  if (!is.null(target_id)) {
+    linked <- DBI::dbGetQuery(con, "SELECT target_id FROM link WHERE source_id = ? AND link_type IN ('satisfied_by', 'allocated_to')", params = list(target_id))$target_id
+    if (target_kind == "element") {
+      neighbours <- DBI::dbGetQuery(con, "
+        SELECT DISTINCT l.target_id FROM connector c JOIN port s ON s.id = c.source_port_id JOIN port t ON t.id = c.target_port_id
+          JOIN link l ON l.link_type = 'allocated_to' AND l.source_id = CASE WHEN s.element_id = ? THEN t.element_id ELSE s.element_id END
+         WHERE s.element_id = ? OR t.element_id = ?", params = list(target_id, target_id, target_id))$target_id
+      score <- score + 1 * (elements$id %in% neighbours)
+    } else {
+      siblings <- DBI::dbGetQuery(con, "SELECT l.target_id, e.parent_id FROM link l JOIN requirement r ON r.id = l.source_id
+                                         JOIN element e ON e.id = l.target_id
+                                         WHERE l.link_type = 'satisfied_by' AND r.parent_id = (SELECT parent_id FROM requirement WHERE id = ?)", params = list(target_id))
+      score <- score + 0.5 * (elements$id %in% siblings$target_id) + 0.25 * (elements$parent_id %in% siblings$parent_id)
+    }
+  }
+  keep <- !elements$id %in% linked
+  elements <- elements[keep, , drop = FALSE]
+  score <- score[keep]
+  chosen <- utils::head(order(-score, elements$name), k)
+  elements <- elements[chosen, , drop = FALSE]
+  summaries <- vapply(elements$id, function(id) {
+    mine <- ports[ports$element_id == id, , drop = FALSE]
+    holds <- unique(mine$name[mine$direction != "in"])
+    takes <- unique(mine$name[mine$direction == "in"])
+    paste(c(if (length(holds) > 0L) paste("provides", paste(holds, collapse = ", ")), if (length(takes) > 0L) paste("takes", paste(takes, collapse = ", "))), collapse = "; ")
+  }, "", USE.NAMES = FALSE)
+  data.frame(n = if (nrow(elements) > 0L) sprintf("C%d", seq_len(nrow(elements))) else character(0), kind = rep("element", nrow(elements)), id = elements$id,
+             name = elements$name, summary = summaries, score = score[chosen], stringsAsFactors = FALSE)
+}
+
+link_coach_prompt <- function(con, target_kind, target_id, k = 10L) {
+  allocating <- target_kind == "element"
+  row <- read_entity(con, target_kind, target_id)
+  text <- if (allocating) row$name else row$text
+  candidates <- rank_candidates(con, text, target_kind, target_id, k)
+  scope <- get_setting(con, "scope_text", "")
+  lines <- if (nrow(candidates) > 0L) sprintf("%s %s%s", candidates$n, candidates$name, ifelse(nzchar(candidates$summary), paste(" —", candidates$summary), "")) else "(none)"
+  list(
+    task = if (allocating) "allocation_coach" else "trace_coach",
+    prompt_builder = "link_coach_prompt", prompt_version = if (allocating) "allocation-coach v1" else "trace-coach v1",
+    system = paste(c(
+      sprintf("You help an engineer decide which component should own a %s. The engineer chooses.", if (allocating) "function" else "requirement"),
+      COACH_POLICY,
+      "Ask up to two questions. Each must end with a question mark, and argue the candidates worth considering.",
+      "Refer to components only by their handle, such as C2. Don't make up handles.",
+      "If no candidate fits, ask what the model is missing and list no candidates."
+    ), collapse = "\n"),
+    message = paste(c(
+      if (nzchar(scope)) paste("System scope:", scope),
+      paste(if (allocating) "Function:" else "Requirement:", text),
+      "Candidates:", lines
+    ), collapse = "\n"),
+    schema = LINK_SCHEMA, cache_text = NULL,
+    candidates_json = canonical_json(lapply(seq_len(nrow(candidates)), function(i) as.list(candidates[i, c("n", "kind", "id", "name")]))),
+    candidates = candidates, target = list(kind = target_kind, id = target_id)
+  )
+}

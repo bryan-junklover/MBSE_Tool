@@ -137,3 +137,14 @@ select.mb-table-input { min-width: 92px; }
 .mb-chip { font-size: 12px; padding: 2px 8px; border-radius: var(--radius-chip); background: var(--surface-muted); }
 .mb-chip-on { background: var(--ink); color: #FFFFFF; }
 .mb-provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 12px; }
+
+/* Traceability */
+.mb-matrix { text-align: center; }
+.mb-matrix th:first-child { text-align: left; }
+.mb-matrix th { font-size: 12px; min-width: 70px; }
+.mb-cell { font: inherit; width: 100%; min-height: 32px; border: 0; background: transparent; cursor: pointer; color: var(--ink); }
+.mb-cell:hover { background: var(--surface-muted); }
+.mb-cell-candidate { outline: 2px dashed var(--ai); outline-offset: -5px; color: var(--ai-text); font-family: var(--font-mono); font-size: 11px; }
+.mb-cell:disabled { cursor: default; }
+.mb-draft-row { background: var(--surface-muted); }
+.mb-row-selected { outline: 2px solid var(--ink); outline-offset: -2px; }

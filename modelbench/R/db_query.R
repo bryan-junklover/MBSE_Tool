@@ -61,7 +61,6 @@ baselineable_entities <- function(con) {
 }
 
 # The (kind, id, rev) entries a verification record depends on (SCHEMA §7).
-# State machine content (Phase 4) joins this list.
 verification_context <- function(con, requirement_id) {
   requirement <- DBI::dbGetQuery(con, "SELECT 'requirement' AS kind, id, rev FROM requirement WHERE id = ?",
                                  params = list(requirement_id))
@@ -77,7 +76,18 @@ verification_context <- function(con, requirement_id) {
      WHERE v.owner_kind = 'element' AND l.link_type = 'satisfied_by'
        AND l.source_kind = 'requirement' AND l.source_id = ?",
                             params = list(requirement_id))
-  context <- rbind(requirement, elements, values, requirement_analysis_inputs(con, requirement_id))
+  machine <- DBI::dbGetQuery(con, "
+    SELECT 'state_machine' AS kind, m.id, m.rev FROM state_machine m JOIN sm_assertion a ON a.sm_id = m.id
+      JOIN link l ON l.target_kind = 'sm_assertion' AND l.target_id = a.id
+     WHERE l.link_type = 'verified_by' AND l.source_kind = 'requirement' AND l.source_id = ?",
+                             params = list(requirement_id))
+  parts <- lapply(machine$id, function(sm) {
+    rbind(DBI::dbGetQuery(con, "SELECT 'sm_state' AS kind, id, rev FROM sm_state WHERE sm_id = ?", params = list(sm)),
+          DBI::dbGetQuery(con, "SELECT 'sm_transition' AS kind, id, rev FROM sm_transition WHERE sm_id = ?", params = list(sm)),
+          DBI::dbGetQuery(con, "SELECT 'sm_event' AS kind, id, rev FROM sm_event WHERE sm_id = ?", params = list(sm)),
+          DBI::dbGetQuery(con, "SELECT 'sm_variable' AS kind, id, rev FROM sm_variable WHERE sm_id = ?", params = list(sm)))
+  })
+  context <- do.call(rbind, c(list(requirement, elements, values, requirement_analysis_inputs(con, requirement_id), machine), parts))
   context <- context[!duplicated(context[c("kind", "id")]), , drop = FALSE]
   context <- context[order(context$kind, context$id, method = "radix"), , drop = FALSE]
   lapply(seq_len(nrow(context)), function(i) as.list(context[i, , drop = FALSE]))

@@ -35,7 +35,7 @@ blocker_target <- function(kind, id, owner_kind = NA, owner_id = NA) {
 
 render_health <- function(health, input_id) {
   blockers <- health$blockers
-  count <- nrow(blockers$placeholders) + nrow(blockers$unreviewed)
+  count <- nrow(blockers$placeholders) + nrow(blockers$unreviewed) + nrow(blockers$stale)
   place_links <- lapply(seq_len(nrow(blockers$placeholders)), function(i) {
     row <- blockers$placeholders[i, ]
     health_link(row$text, blocker_target(row$entity_kind, row$entity_id, row$owner_kind, row$owner_id), input_id)
@@ -43,6 +43,10 @@ render_health <- function(health, input_id) {
   draft_links <- lapply(seq_len(nrow(blockers$unreviewed)), function(i) {
     row <- blockers$unreviewed[i, ]
     health_link(sprintf("%s · %s", row$label, gsub("_", " ", row$entity_kind)), blocker_target(row$entity_kind, row$entity_id), input_id)
+  })
+  stale_links <- lapply(seq_len(nrow(blockers$stale)), function(i) {
+    row <- blockers$stale[i, ]
+    health_link(sprintf("%s · %s", if (is.na(row$test_case_id)) row$id else row$test_case_id, row$text), list(place = "requirement", id = row$requirement_id), input_id)
   })
   group <- function(title, links, note = NULL) {
     shiny::tags$div(style = "display:flex;flex-direction:column;gap:6px", shiny::tags$b(title), links,
@@ -64,7 +68,8 @@ render_health <- function(health, input_id) {
                         shiny::tags$span(class = "mb-caption", "A baseline only holds what an engineer decided.")),
         shiny::tags$div(class = "mb-banner-groups",
                         if (length(place_links) > 0L) group(sprintf("%d placeholders", length(place_links)), place_links, draft_note),
-                        if (length(draft_links) > 0L) group(sprintf("%d unreviewed AI drafts, each needs your note", length(draft_links)), draft_links))
+                        if (length(draft_links) > 0L) group(sprintf("%d unreviewed AI drafts, each needs your note", length(draft_links)), draft_links),
+                        if (length(stale_links) > 0L) group(sprintf("%d piece%s of stale evidence", length(stale_links), if (length(stale_links) == 1L) "" else "s"), stale_links))
       )
     },
     shiny::tags$div(
@@ -74,7 +79,7 @@ render_health <- function(health, input_id) {
         health_row("Pass the gate", health$requirements$passing),
         health_row("Fail the gate", health$requirements$failing, spec, input_id),
         health_row("Committed without a coach review", health$requirements$uncoached),
-        health_row("Committed but unallocated", health$requirements$unallocated, spec, input_id),
+        health_row("Committed but unallocated", health$requirements$unallocated, list(place = "trace"), input_id),
         health_row("No verification method", health$requirements$no_verification, spec, input_id)
       )),
       health_card("Architecture", c(
@@ -86,7 +91,10 @@ render_health <- function(health, input_id) {
       )),
       health_card("Functional", c(
         health_row("Functions", health$functional$functions),
-        health_row("Unallocated", health$functional$unallocated)
+        health_row("Unallocated", health$functional$unallocated, list(place = "functional"), input_id),
+        list(shiny::tags$span(class = if (health$functional$flows_realised < health$functional$flows) "mb-gap", "Flows with a physical path"),
+             shiny::tags$span(class = paste("mono", if (health$functional$flows_realised < health$functional$flows) "mb-gap"),
+                              sprintf("%d / %d", health$functional$flows_realised, health$functional$flows)))
       )),
       health_card("Behavior", c(
         health_row("Scenarios", health$behavior$scenarios),
@@ -134,6 +142,12 @@ mod_health_server <- function(id, state) {
       switch(
         target$place,
         spec = go_to(state, "Write", "Specification"),
+        functional = go_to(state, "Model", "Functional"),
+        trace = go_to(state, "Write", "Traceability"),
+        requirement = {
+          state$selected_requirement(target$id)
+          go_to(state, "Write", "Specification")
+        },
         structure = go_to(state, "Model", "Structure"),
         element = {
           state$selected_entity(list(kind = "element", ids = target$id))

@@ -20,6 +20,30 @@ mod_review_ui <- function(id) {
   )
 }
 
+# One button per candidate, off until the rationale has text (handoff §5.3).
+render_candidate_choices <- function(row, ns, dismiss = NULL) {
+  candidates <- jsonlite::fromJSON(row$candidates_json, simplifyVector = FALSE)
+  note <- ns(paste0("rationale_", row$id))
+  group <- ns(paste0("links_", row$id))
+  shiny::tagList(
+    lapply(candidates, function(candidate) {
+      if (is.null(candidate$why) || !nzchar(candidate$why)) return(NULL)
+      shiny::tags$div(class = "mb-caption", shiny::tags$b(candidate$name), ": ", candidate$why)
+    }),
+    shiny::tags$label(style = "display:flex;flex-direction:column;gap:4px;font-size:13px", "Your rationale, required to link",
+                      shiny::tags$input(type = "text", id = note, class = "mb-table-input", placeholder = "In your own words",
+                                        oninput = sprintf("document.querySelectorAll('#%s button.mb-candidate').forEach(b => b.disabled = !this.value.trim())", group))),
+    shiny::tags$div(id = group, class = "mb-term-actions",
+                    lapply(candidates, function(candidate) {
+                      shiny::tags$button(type = "button", class = "mb-btn mb-candidate", disabled = NA,
+                                         onclick = sprintf("Shiny.setInputValue('%s', {id: %s, handle: %s, note: document.getElementById('%s').value, n: Math.random()}, {priority: 'event'})",
+                                                           ns("keep_link"), jsonlite::toJSON(row$id, auto_unbox = TRUE), jsonlite::toJSON(candidate$n, auto_unbox = TRUE), note),
+                                         sprintf("Link to %s", candidate$name))
+                    }),
+                    dismiss)
+  )
+}
+
 render_proposal_card <- function(row, ns) {
   payload <- jsonlite::fromJSON(row$payload_json, simplifyVector = FALSE)
   open <- row$status == "open"
@@ -66,6 +90,8 @@ render_proposal_card <- function(row, ns) {
                                   shiny::tags$button(type = "button", class = "mb-btn mb-btn-ai", onclick = event_js(ns("start"), row$id), "Start from this in Write"),
                                   dismiss)
       )
+    } else if (row$proposal_kind == "candidate_link" && !is.na(row$candidates_json)) {
+      if (open) render_candidate_choices(row, ns, dismiss)
     } else if (structural) {
       if (open) {
         shiny::tags$div(class = "mb-term-actions",
@@ -113,6 +139,10 @@ mod_review_server <- function(id, state) {
       if (is.null(written)) return()
       state$commands(push_command(state$commands(), change_command(written$change_set, "add sketch")))
       invalidate_db(state, c("ai", "model"))
+    })
+    shiny::observeEvent(input$keep_link, {
+      written <- model_edit(state, keep_candidate(con(), input$keep_link$id, input$keep_link$handle, input$keep_link$note), "link")
+      if (!is.null(written)) invalidate_db(state, "ai")
     })
     shiny::observeEvent(input$start, {
       draft <- guarded_edit(start_from_sketch(con(), input$start))

@@ -46,6 +46,25 @@ spec_columns <- function() {
   )
 }
 
+render_evidence <- function(cases, ns) {
+  shiny::tags$section(
+    class = "mb-panel",
+    shiny::tags$div(class = "mb-head", shiny::tags$b("Verification"),
+                    shiny::tags$button(type = "button", class = "mb-btn mb-btn-small mb-push", onclick = event_js(ns("add_case"), "new"), "Add test case…")),
+    if (nrow(cases) == 0L) shiny::tags$span(class = "mb-caption", "No test cases yet."),
+    lapply(seq_len(nrow(cases)), function(i) {
+      case <- cases[i, ]
+      shiny::tags$div(
+        style = "display:flex;flex-direction:column;gap:4px",
+        shiny::tags$div(class = "mb-head", shiny::tags$span(class = "mono", case$id), shiny::tags$span(case$name),
+                        shiny::tags$button(type = "button", class = "mb-btn mb-btn-small mb-push", onclick = event_js(ns("record"), case$id), "Record a result…")),
+        shiny::tags$span(class = "mb-caption", if (is.na(case$result)) "No result recorded." else sprintf("%s · %s", toupper(case$result), case$recorded_at)),
+        if (!is.na(case$stale)) shiny::tags$span(class = "mb-gap", style = "font-size:12px", sprintf("Stale evidence: %s", case$stale))
+      )
+    })
+  )
+}
+
 mod_spec_server <- function(id, state) {
   shiny::moduleServer(id, function(input, output, session) {
     ns <- session$ns
@@ -113,6 +132,7 @@ mod_spec_server <- function(id, state) {
         shiny::selectInput(ns("d_verify"), "Verify by", choices = with_blank(VERIFY_METHODS), selected = value(row$verification_method)),
         shiny::textAreaInput(ns("d_rationale"), "Rationale", value(row$rationale), rows = 3),
         shiny::uiOutput(ns("findings")),
+        shiny::uiOutput(ns("evidence")),
         shiny::actionButton(ns("rewrite"), "Rewrite it in Write", class = "mb-btn")
       )
     })
@@ -121,6 +141,47 @@ mod_spec_server <- function(id, state) {
       shiny::req(row)
       db_dep(state, "model")
       render_findings(requirement_findings(row, model_terms(con())))
+    })
+
+    output$evidence <- shiny::renderUI({
+      db_dep(state, "model")
+      row <- current()
+      shiny::req(row)
+      render_evidence(requirement_evidence(con(), row$id), ns)
+    })
+    shiny::observeEvent(input$add_case, {
+      shiny::showModal(shiny::modalDialog(
+        title = "Add a test case",
+        shiny::textInput(ns("case_name"), "Name"),
+        shiny::selectInput(ns("case_method"), "Method", choices = VERIFY_METHODS),
+        footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("case_confirm"), "Add test case", class = "mb-btn mb-btn-primary"))
+      ))
+    })
+    shiny::observeEvent(input$case_confirm, {
+      written <- guarded_edit(add_test_case(con(), selected(), input$case_name, input$case_method))
+      if (is.null(written)) return()
+      shiny::removeModal()
+      invalidate_db(state, c("spec", "model"))
+    })
+    pending_case <- shiny::reactiveVal(NULL)
+    shiny::observeEvent(input$record, {
+      pending_case(input$record)
+      shiny::showModal(shiny::modalDialog(
+        title = sprintf("Record a result for %s", input$record),
+        shiny::selectInput(ns("record_result"), "Result", choices = c("Pass" = "pass", "Fail" = "fail", "Inconclusive" = "inconclusive")),
+        shiny::textInput(ns("record_ref"), "Evidence reference", placeholder = "Report id, file or link"),
+        shiny::textAreaInput(ns("record_note"), "Note"),
+        shiny::tags$p(class = "mb-caption", "It's stored against the model as it stands now, and goes stale if anything it depended on changes."),
+        footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("record_confirm"), "Record result", class = "mb-btn mb-btn-primary"))
+      ))
+    })
+    shiny::observeEvent(input$record_confirm, {
+      blank <- function(x) if (is.null(x) || !nzchar(trimws(x))) NULL else x
+      written <- guarded_edit(write_verification_record(con(), selected(), pending_case(), input$record_result, "engineer",
+                                                        evidence_ref = blank(input$record_ref), note = blank(input$record_note)))
+      if (is.null(written)) return()
+      shiny::removeModal()
+      invalidate_db(state, c("spec", "model"))
     })
 
     save_detail <- function(field, value) {

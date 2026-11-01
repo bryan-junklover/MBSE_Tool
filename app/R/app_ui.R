@@ -49,7 +49,7 @@ app_ui <- function() {
             id = "write_tab", selected = "Draft",
             bslib::nav_panel_hidden("Draft", mod_write_ui("write")),
             bslib::nav_panel_hidden("Specification", mod_spec_ui("spec")),
-            bslib::nav_panel_hidden("Traceability", phase_placeholder("Traceability", 4L))
+            bslib::nav_panel_hidden("Traceability", mod_trace_ui("trace"))
           )
         ),
         bslib::nav_panel_hidden(
@@ -58,8 +58,8 @@ app_ui <- function() {
           bslib::navset_hidden(
             id = "model_tab", selected = "Structure",
             bslib::nav_panel_hidden("Structure", mod_model_ui("model")),
-            bslib::nav_panel_hidden("Flows", phase_placeholder("The flows view", 4L)),
-            bslib::nav_panel_hidden("Functional", phase_placeholder("The functional view", 4L)),
+            bslib::nav_panel_hidden("Flows", mod_model_ui("flows", "flows")),
+            bslib::nav_panel_hidden("Functional", mod_model_ui("functional", "functional")),
             bslib::nav_panel_hidden("Interfaces", mod_interfaces_ui("interfaces"))
           )
         ),
@@ -161,6 +161,9 @@ app_server <- function(input, output, session) {
   mod_write_server("write", state)
   mod_spec_server("spec", state)
   mod_model_server("model", state)
+  mod_model_server("flows", state, "flows")
+  mod_model_server("functional", state, "functional")
+  mod_trace_server("trace", state)
   mod_interfaces_server("interfaces", state)
   mod_health_server("health", state)
   mod_review_server("review", state)

@@ -13,3 +13,5 @@ local_sample_state <- function(env = parent.frame()) {
 }
 
 html_of <- function(tag) as.character(htmltools::renderTags(tag)$html)
+
+count_rows <- function(con, view) DBI::dbGetQuery(con, sprintf("SELECT count(*) AS n FROM %s", view))$n

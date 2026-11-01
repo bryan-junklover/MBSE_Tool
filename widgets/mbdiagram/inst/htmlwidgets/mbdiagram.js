@@ -8,6 +8,7 @@ HTMLWidgets.widget({
     var INK = "#1C1D1F", LINE = "#9A9DA3", AI = "#2F5BD3", AI_TINT = "#EAF0FD", AI_TEXT = "#1E3F9E",
         GAP = "#B35A00", GAP_TINT = "#FFF3E3", GAP_TEXT = "#8A4500", EDGE = "#6B6E74", CANVAS = "#FAFAF9";
     var MONO = "IBM Plex Mono, ui-monospace, monospace", SANS = "IBM Plex Sans, system-ui, sans-serif";
+    var FLOW_STYLES = { data: { stroke: "#45484D", width: 2 }, energy: { stroke: INK, width: 4 }, matter: { stroke: LINE, width: 2, dash: "6 4" } };
     var BLOCK_W = 180, BLOCK_H = 76, BOUNDARY_W = 110, BOUNDARY_H = 34;
 
     function portGroup(position) {
@@ -77,7 +78,9 @@ HTMLWidgets.widget({
       return { width: Math.max(BLOCK_W, 28 * Math.max(sides.top, sides.bottom) + 40), height: Math.max(BLOCK_H, 24 * Math.max(sides.left, sides.right) + 24) };
     }
     function blockAttrs(node) {
-      var a = { name: { text: node.name }, stereotype: { text: (node.stereotype ? "«" + node.stereotype + "»" : "") + (node.multiplicity > 1 ? " ×" + node.multiplicity : "") }, note: { text: node.gap_note ? "Gap: " + node.gap_note : "" } };
+      var kicker = data && data.mode === "functional" ? node.id : (node.stereotype ? "«" + node.stereotype + "»" : "") + (node.multiplicity > 1 ? " ×" + node.multiplicity : "");
+      var a = { name: { text: node.name }, stereotype: { text: kicker }, note: { text: node.gap_note ? "Gap: " + node.gap_note : "" } };
+      if (node.allocation) a.note = { text: node.allocation, fill: node.unallocated ? GAP_TEXT : "#5B5E63" };
       if (node.review_state === "unreviewed") {
         a.body = { stroke: AI, strokeWidth: 2, strokeDasharray: "6 6", fill: AI_TINT };
         a.name.fill = AI_TEXT;
@@ -123,6 +126,13 @@ HTMLWidgets.widget({
         link.target(t || { x: 0, y: 0 });
         if (edge.review_state === "unreviewed") link.attr("line", { stroke: AI, strokeDasharray: "6 6" });
         if (edge.stub) link.attr("line/strokeDasharray", "4 4");
+        if (x.mode === "flows") {
+          var style = FLOW_STYLES[edge.flow_type];
+          if (style) {
+            link.attr("line", { stroke: style.stroke, strokeWidth: style.width, strokeDasharray: style.dash || null, targetMarker: { type: "path", d: "M 8 -4 L 0 0 L 8 4 z", fill: style.stroke, stroke: style.stroke } });
+            link.set("mbWidth", style.width);
+          }
+        }
         if (edge.label) link.labels([{ attrs: { text: { text: edge.label, fontFamily: MONO, fontSize: 12, fill: "#45484D" }, rect: { fill: CANVAS, stroke: "none" } }, position: 0.5 }]);
         links.push(link);
       });
@@ -134,6 +144,7 @@ HTMLWidgets.widget({
       // port. Sorting by z does the same, but takes 600 ms at 150 components.
       graph.resetCells(links.concat(blocks).concat(boundary));
       placeStubs(links);
+      drawBand();
       fit();
       applySelection();
       holder.scrollLeft = scrollX;
@@ -141,6 +152,23 @@ HTMLWidgets.widget({
       if (!sameLevel) showBlocks();
       var unplaced = x.nodes.filter(function (node) { return node.x == null; });
       if (unplaced.length > 0) autoLayout(false);
+    }
+    // The dashed band at the bottom of Flows, holding what's outside the system.
+    function drawBand() {
+      if (!data || data.mode !== "flows") return;
+      var old = graph.getCell("B:band");
+      if (old) old.remove();
+      var outside = data.nodes.filter(function (n) { return n.kind === "external"; }).map(function (n) { return graph.getCell(n.id); }).filter(Boolean);
+      if (outside.length === 0) return;
+      var top = Infinity, bottom = 0;
+      outside.forEach(function (b) { top = Math.min(top, b.position().y); bottom = Math.max(bottom, b.position().y + b.size().height); });
+      var box = graph.getBBox();
+      var band = new Block({
+        id: "B:band", position: { x: box.x - 16, y: top - 34 }, size: { width: box.width + 32, height: bottom - top + 50 },
+        attrs: { root: { pointerEvents: "none" }, body: { fill: "transparent", stroke: LINE, strokeDasharray: "4 4" },
+                 stereotype: { text: "" }, name: { text: "Environment (outside the system)", y: 18, fontWeight: 400, fontSize: 12, fill: "#5B5E63", textWrap: null }, note: { text: "" } }
+      });
+      graph.addCell(band);
     }
     // A wide layout can start well off to the side, so open where the blocks are.
     function showBlocks() {
@@ -177,7 +205,8 @@ HTMLWidgets.widget({
     // Touches only the cells whose state changed: a full pass redraws every link.
     function paintSelected(cell, on) {
       if (cell.isLink()) {
-        cell.attr("line/strokeWidth", on ? 3 : 2);
+        var width = cell.get("mbWidth") || 2;
+        cell.attr("line/strokeWidth", on ? width + 1 : width);
         return;
       }
       var node = data && data.nodes.filter(function (n) { return n.id === cell.id; })[0];
@@ -274,6 +303,8 @@ HTMLWidgets.widget({
     // Runs ELK layered with port sides. Pinned blocks keep their positions.
     function autoLayout(userAsked) {
       if (!data) return;
+      var band = graph.getCell("B:band");
+      if (band) band.remove();
       var blocks = graph.getElements().filter(function (b) { return String(b.id).indexOf("B:") !== 0; });
       var known = {};
       blocks.forEach(function (b) { known[b.id] = true; });
@@ -305,8 +336,20 @@ HTMLWidgets.widget({
           block.position(x, y);
           positions.push({ id: c.id, x: x, y: y });
         });
+        // What's outside the system sits in a row under everything inside it.
+        var outside = data.nodes.filter(function (n) { return n.kind === "external" && !pinned[n.id]; });
+        if (outside.length > 0) {
+          var deepest = 0;
+          blocks.forEach(function (b) { if (!outside.some(function (n) { return n.id === b.id; })) deepest = Math.max(deepest, b.position().y + b.size().height); });
+          outside.forEach(function (n, i) {
+            var cell = graph.getCell(n.id), x = 120 + i * 240, y = deepest + 110;
+            cell.position(x, y);
+            positions = positions.filter(function (p) { return p.id !== n.id; }).concat([{ id: n.id, x: x, y: y }]);
+          });
+        }
         graph.stopBatch("layout");
         placeStubs(graph.getLinks());
+        drawBand();
         fit();
         showBlocks();
         send("layout", { positions: positions, user: !!userAsked });

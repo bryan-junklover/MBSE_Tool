@@ -181,3 +181,55 @@ link_from_candidate <- function(con, proposal_id, handle, link_type, source_kind
     written
   })
 }
+
+# What a link proposal becomes, from what it's about.
+candidate_link_type <- function(target_kind) if (identical(target_kind, "requirement")) "satisfied_by" else "allocated_to"
+
+keep_candidate <- function(con, proposal_id, handle, rationale, author = "engineer") {
+  proposal <- DBI::dbGetQuery(con, "SELECT target_kind, target_id, status FROM ai_proposal WHERE id = ?", params = list(proposal_id))
+  if (nrow(proposal) == 0L) refuse("That proposal no longer exists.")
+  if (proposal$status != "open") refuse("That proposal has already been handled.")
+  link_from_candidate(con, proposal_id, handle, candidate_link_type(proposal$target_kind), proposal$target_kind, proposal$target_id, rationale, author)
+}
+
+# Names in place of handles, so the engineer reads plain words.
+handles_to_names <- function(text, candidates) {
+  for (i in order(-nchar(candidates$n))) {
+    text <- gsub(paste0("\\b", candidates$n[i], "\\b"), candidates$name[i], text)
+  }
+  text
+}
+
+# Numbered candidates back from the model: only what resolves survives. With none left
+# it's still a useful question, so it's stored as one.
+store_link_answer <- function(con, prompt, result) {
+  candidates <- prompt$candidates
+  allowed <- c(candidates$name, candidates$n)
+  ids <- character(0)
+  for (item in result$value$items) {
+    argued <- list()
+    invented <- 0L
+    for (choice in item$candidates) {
+      at <- match(trimws(choice$handle), candidates$n)
+      if (is.na(at)) {
+        log_ai_drop(con, list(call = result$call_id, dropped = "candidate", handle = choice$handle))
+        next
+      }
+      why <- scrub_numbers(handles_to_names(choice$why, candidates), allowed)
+      invented <- invented + why$count
+      argued[[length(argued) + 1L]] <- list(n = candidates$n[at], kind = "element", id = candidates$id[at], name = candidates$name[at], why = why$text)
+    }
+    title <- scrub_numbers(handles_to_names(item$question, candidates), allowed)
+    invented <- invented + title$count
+    payload <- list()
+    if (invented > 0L) payload$`_invented` <- invented
+    if (!grepl("\\?\\s*$", title$text)) payload$`_warning` <- "The title isn't phrased as a question."
+    ids <- c(ids, insert_proposal(con, list(
+      task = prompt$task, proposal_kind = if (length(argued) > 0L) "candidate_link" else "question", source = "ai",
+      target_kind = prompt$target$kind, target_id = prompt$target$id, title = title$text,
+      payload_json = if (length(payload) == 0L) "{}" else canonical_json(payload),
+      candidates_json = if (length(argued) > 0L) canonical_json(argued), llm_call_id = result$call_id
+    )))
+  }
+  ids
+}

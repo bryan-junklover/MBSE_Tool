@@ -219,7 +219,8 @@ unchanged. When it is recorded, core builds its context, a list of
 The context is stored as `context_json` and its hash as `context_hash`.
 `stale_evidence()` rebuilds each record's context from the current revisions and
 reports any record whose hash no longer matches, along with the entries that
-changed. On the sample project TC-007 is stale because `V-0013`
+changed. Only the latest record for each test case counts, so recording a new result is how
+evidence becomes current. On the sample project TC-007 is stale because `V-0013`
 (battery_capacity) went from rev 1 to rev 2.
 
 ## 8. Impact traversal (deterministic)
