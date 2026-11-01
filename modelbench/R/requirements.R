@@ -1,12 +1,20 @@
 # Requirement workflow: committing, drafts, what the Specification shows, and imports.
 
+# A coach counts when the light check runs on every edit and its route can actually
+# be used. With none, commit runs on the gate alone (BUILD_PLAN §5: no key, no lockout).
 coach_configured <- function(con) {
-  DBI::dbGetQuery(con, "SELECT count(*) AS n FROM task_route WHERE task = 'req_light_check' AND provider_id IS NOT NULL")$n > 0L
+  route <- DBI::dbGetQuery(con, "SELECT * FROM task_route WHERE task = 'req_light_check'")
+  if (nrow(route) == 0L || route$trigger_mode != "every_edit" || is.na(route$provider_id)) return(FALSE)
+  provider <- DBI::dbGetQuery(con, "SELECT * FROM provider WHERE id = ? AND enabled = 1", params = list(route$provider_id))
+  if (nrow(provider) == 0L || is.na(route$model)) return(FALSE)
+  provider$is_local == 1L || provider_has_key(provider$id)
 }
 
 # Whether Commit is on, and why not. A review only counts for the exact text it
-# assessed: "some assessment exists" is never enough (BUILD_PLAN §5).
-commit_state <- function(gate, current_text, configured = FALSE, assessed_text = NA_character_) {
+# assessed: "some assessment exists" is never enough (BUILD_PLAN §5). If the coach
+# couldn't run on this text, it falls back to the gate alone, so a stopped server
+# never locks anyone out.
+commit_state <- function(gate, current_text, configured = FALSE, assessed_text = NA_character_, coach_failed_text = NA_character_) {
   if (!nzchar(trimws(current_text))) return(list(enabled = FALSE, reason = "Write a requirement to commit it."))
   if (!isTRUE(gate$passes_gate)) {
     return(list(enabled = FALSE, reason = paste(gate_blockers(gate), collapse = " ")))
@@ -14,10 +22,13 @@ commit_state <- function(gate, current_text, configured = FALSE, assessed_text =
   if (!configured) {
     return(list(enabled = TRUE, reason = "No coach is configured, so this commits on the gate alone and is marked uncoached."))
   }
-  if (!identical(assessed_text, current_text)) {
-    return(list(enabled = FALSE, reason = "Waiting for the coach to review this exact text."))
+  if (identical(assessed_text, current_text)) {
+    return(list(enabled = TRUE, reason = "The coach's review is current for this exact text. Commit re-runs the gate."))
   }
-  list(enabled = TRUE, reason = "The coach's review is current for this exact text. Commit re-runs the gate.")
+  if (identical(coach_failed_text, current_text)) {
+    return(list(enabled = TRUE, reason = "The coach couldn't run, so this commits on the gate alone and is marked uncoached."))
+  }
+  list(enabled = FALSE, reason = "Waiting for the coach to review this exact text.")
 }
 
 gate_fields <- function(gate) {
@@ -50,9 +61,14 @@ save_requirement_text <- function(con, gate, id, fields, author, note) {
 # Commits a requirement. Core re-runs the gate whatever the UI thought, and the
 # database refuses placeholders on its own (BUILD_PLAN Phase 1).
 commit_requirement <- function(con, text, id = NULL, fields = list(), author = "engineer",
-                               note = NULL, coach_state = "uncoached") {
+                               note = NULL, coach_state = "uncoached", assessed_text = NULL, coach_call_id = NULL) {
   gate <- check_requirement(text, model_terms(con))
   if (!gate$passes_gate) refuse("Can't commit: ", paste(gate_blockers(gate), collapse = " "))
+  # "Reviewed" only stands for the exact words the coach saw, whatever the button thought.
+  if (identical(coach_state, "reviewed")) {
+    if (!identical(stringr::str_squish(assessed_text), gate$text)) refuse("Can't commit: the coach's review is for different text.")
+    fields$coach_call_id <- coach_call_id
+  }
   save_requirement_text(con, gate, id, c(fields, list(status = "committed", coach_state = coach_state)), author, note)
 }
 

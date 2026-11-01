@@ -620,6 +620,25 @@ CREATE TABLE IF NOT EXISTS task_route (
   fallback_model       TEXT
 );
 
+-- Default providers and routes, seeded on every open. The local model is left for the
+-- engineer to pick, so no coach counts as configured until then.
+INSERT OR IGNORE INTO provider (id, kind, label, base_url, is_local) VALUES
+ ('anthropic', 'anthropic', 'Anthropic', NULL, 0),
+ ('openai', 'openai', 'OpenAI', NULL, 0),
+ ('lmstudio', 'openai_compatible', 'LM Studio', 'http://localhost:1234/v1', 1);
+INSERT OR IGNORE INTO task_route (task, trigger_mode, provider_id, model, fallback_provider_id, fallback_model) VALUES
+ ('req_light_check', 'every_edit', 'lmstudio', NULL, NULL, NULL),
+ ('req_deep_check', 'on_demand', 'anthropic', 'claude-sonnet-5-5', 'openai', 'gpt-5.6-luna'),
+ ('scope_gaps', 'on_demand', 'anthropic', 'claude-sonnet-5-5', 'openai', 'gpt-5.6-luna'),
+ ('trace_coach', 'on_demand', 'anthropic', 'claude-sonnet-5-5', 'openai', 'gpt-5.6-luna'),
+ ('gap_inference', 'on_demand', 'anthropic', 'claude-sonnet-5-5', 'openai', 'gpt-5.6-luna'),
+ ('allocation_coach', 'on_demand', 'anthropic', 'claude-sonnet-5-5', 'openai', 'gpt-5.6-luna'),
+ ('impact_narrative', 'on_demand', 'anthropic', 'claude-sonnet-5-5', 'lmstudio', NULL),
+ ('behavior_sketch', 'on_demand', 'anthropic', 'claude-sonnet-5-5', 'openai', 'gpt-5.6-luna'),
+ ('behavior_analysis', 'on_demand', 'anthropic', 'claude-sonnet-5-5', 'openai', 'gpt-5.6-luna'),
+ ('stakeholder_summary', 'on_demand', 'openai', 'gpt-5.6-luna', 'lmstudio', NULL),
+ ('model_chat', 'when_asked', 'anthropic', 'claude-haiku-5-5', 'lmstudio', NULL);
+
 CREATE TABLE IF NOT EXISTS llm_call (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   task            TEXT NOT NULL,

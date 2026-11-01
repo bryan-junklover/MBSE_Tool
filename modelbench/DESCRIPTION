@@ -9,13 +9,17 @@ Encoding: UTF-8
 Imports:
     DBI,
     digest,
+    ellmer,
+    httr2,
+    keyring,
+    promises,
     jsonlite,
     readxl,
     RSQLite,
     stringr,
     utils
 Suggests:
-    ellmer,
+    later,
     openxlsx2,
     pkgload,
     testthat (>= 3.0.0),

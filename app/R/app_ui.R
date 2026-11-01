@@ -70,7 +70,7 @@ app_ui <- function() {
           bslib::navset_hidden(
             id = "analyze_tab", selected = "Health",
             bslib::nav_panel_hidden("Health", mod_health_ui("health")),
-            bslib::nav_panel_hidden("Review queue", phase_placeholder("The review queue", 3L)),
+            bslib::nav_panel_hidden("Review queue", mod_review_ui("review")),
             bslib::nav_panel_hidden("Baselines & impact", phase_placeholder("Baselines and impact", 5L))
           )
         )
@@ -111,7 +111,11 @@ app_server <- function(input, output, session) {
     db_dep(state, "model")
     db_dep(state, "behavior")
     db_dep(state, "ai")
-    render_status_strip(status_counts(state$con()), "nav_click")
+    db_dep(state, "settings")
+    # Checks the local server every so often, with a short timeout.
+    shiny::invalidateLater(30000)
+    render_status_strip(status_counts(state$con()), "nav_click", coach_status(state$con()), ai_usage_today(state$con()),
+                        get_setting(state$con(), "coaching_policy", "tiered"))
   })
   output$top_nav <- shiny::renderUI(render_top_nav(state$nav()$workspace, "nav_click"))
   # The tab last used in each workspace, kept when moving between them.
@@ -159,4 +163,6 @@ app_server <- function(input, output, session) {
   mod_model_server("model", state)
   mod_interfaces_server("interfaces", state)
   mod_health_server("health", state)
+  mod_review_server("review", state)
+  mod_ai_settings_server("ai_settings", state)
 }

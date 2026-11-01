@@ -75,3 +75,11 @@ test_that("the diagram widget keeps blank positions and single selections in sha
   expect_null(parsed$nodes[[1]]$x)
   expect_identical(parsed$selected, list("C-1"))
 })
+
+test_that("nothing outside the tests loads the test helpers, which switch off real AI", {
+  scripts <- c(file.path(ROOT, "app", "app.R"), list.files(file.path(ROOT, "tools"), pattern = "[.]R$", full.names = TRUE))
+  for (script in scripts) {
+    loads <- grep("load_all", readLines(script), value = TRUE)
+    expect_true(all(grepl("helpers = FALSE", loads)), info = script)
+  }
+})

@@ -4,7 +4,7 @@
 args <- commandArgs(trailingOnly = TRUE)
 path <- if (length(args) >= 1L) args[[1]] else "survey_uav.sqlite"
 if (file.exists(path)) stop(path, " already exists; choose another path or remove it first")
-pkgload::load_all("modelbench", quiet = TRUE)
+pkgload::load_all("modelbench", quiet = TRUE, helpers = FALSE)
 con <- build_sample_project(path)
 cat("Built", path, "\nmodel hash:", model_hash(con), "\n")
 DBI::dbDisconnect(con)

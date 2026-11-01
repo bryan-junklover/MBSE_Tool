@@ -55,11 +55,17 @@ mod_write_ui <- function(id) {
                         shiny::uiOutput(ns("commit_note"), class = "mb-caption"))
       ),
       shiny::tags$aside(class = "mb-right",
-                        shiny::tags$section(class = "mb-panel",
-                                            shiny::tags$b("Coach"),
-                                            shiny::uiOutput(ns("coach_note"), class = "mb-caption")))
+                        shiny::uiOutput(ns("coach")),
+                        shiny::uiOutput(ns("scope_gaps")))
     )
   )
+}
+
+ask_dismiss <- function(ns, id, confirm_input, reason_input) {
+  shiny::showModal(shiny::modalDialog(title = "Dismiss with reason",
+                                      shiny::textAreaInput(ns(reason_input), "Why doesn't this apply?", width = "100%"),
+                                      footer = shiny::tagList(shiny::modalButton("Cancel"),
+                                                              shiny::actionButton(ns(confirm_input), "Dismiss", class = "mb-btn mb-btn-primary"))))
 }
 
 mod_write_ears_ui <- function(ns) {
@@ -80,7 +86,7 @@ mod_write_ears_ui <- function(ns) {
 }
 
 # Shiny already holds text input back 250 ms, so 50 more gives the 300 ms gate clock.
-mod_write_server <- function(id, state, debounce_ms = 50) {
+mod_write_server <- function(id, state, debounce_ms = 50, coach_ms = NULL) {
   shiny::moduleServer(id, function(input, output, session) {
     ns <- session$ns
     con <- state$con
@@ -100,12 +106,133 @@ mod_write_server <- function(id, state, debounce_ms = 50) {
     })
     gate <- shiny::reactive(check_requirement(draft_debounced(), dictionary()))
 
+    # --- The coach clock (handoff §5.1): it depends on the draft text only, never on gate
+    # output, which reads the database and once made this loop in the Coach.
+    coach_wait <- shiny::reactive({
+      db_dep(state, "settings")
+      value <- suppressWarnings(as.numeric(get_setting(con(), "coach_wait_ms", "2000")))
+      if (is.na(value)) 2000 else value
+    })
+    draft_for_coach <- shiny::debounce(draft, shiny::reactive(if (is.null(coach_ms)) coach_wait() else coach_ms))
+    review <- shiny::reactiveVal(NULL)
+    coach_failure <- shiny::reactiveVal(NULL)
+    last_processed <- shiny::reactiveVal("")
+    scope_gaps_ran <- shiny::reactiveVal(FALSE)
+
+    light_task <- shiny::ExtendedTask$new(function(connection, text, parent) run_coach_async(connection, text, "req_light_check", parent))
+    deep_task <- shiny::ExtendedTask$new(function(connection, text, parent) run_coach_async(connection, text, "req_deep_check", parent))
+    gaps_task <- shiny::ExtendedTask$new(function(connection) run_gaps_async(connection, "scope_gaps"))
+
+    current_squished <- shiny::reactive(stringr::str_squish(draft()))
+
+    shiny::observeEvent(draft_for_coach(), {
+      text <- stringr::str_squish(draft_for_coach())
+      connection <- shiny::isolate(con())
+      # debounce() doesn't dedupe by value, so this guard does (BUILD_PLAN §5).
+      key <- paste(DBI::dbGetInfo(connection)$dbname, text, sep = "\r")
+      if (identical(key, shiny::isolate(last_processed()))) return()
+      last_processed(key)
+      if (!nzchar(text) || !coach_configured(connection)) return()
+      if (!check_requirement(text, shiny::isolate(dictionary()))$passes_gate) return()
+      parent <- shiny::isolate(input$parent)
+      cached <- coach_from_cache(connection, text, "req_light_check", parent)
+      if (!is.null(cached)) {
+        coach_failure(NULL)
+        review(cached)
+        return()
+      }
+      light_task$invoke(connection, text, parent)
+    }, ignoreNULL = FALSE)
+
+    # A result is cached by core when it arrives, but it's only current if the text still matches.
+    take_review <- function(result) {
+      if (is.null(result$text)) result$text <- shiny::isolate(current_squished())
+      if (isTRUE(result$ok)) {
+        if (identical(result$text, shiny::isolate(current_squished()))) {
+          coach_failure(NULL)
+          review(result)
+        }
+      } else {
+        coach_failure(result)
+      }
+      invalidate_db(state, "ai")
+    }
+    shiny::observeEvent(light_task$result(), take_review(light_task$result()))
+    shiny::observeEvent(deep_task$result(), take_review(deep_task$result()))
+    shiny::observeEvent(gaps_task$result(), invalidate_db(state, "ai"))
+    shiny::observeEvent(input$deep_check, deep_task$invoke(con(), current_squished(), input$parent))
+
+    current_review <- shiny::reactive({
+      held <- review()
+      if (!is.null(held) && identical(held$text, current_squished())) held else NULL
+    })
+    current_failure <- shiny::reactive({
+      held <- coach_failure()
+      if (!is.null(held) && identical(held$text, current_squished())) held else NULL
+    })
+
     commit_info <- shiny::reactive({
       # Checks the live text, so a stale gate result can't leave Commit on while typing.
-      current <- stringr::str_squish(draft())
+      current <- current_squished()
       result <- gate()
       if (!identical(result$text, current)) return(list(enabled = FALSE, reason = "Checking…"))
-      commit_state(result, current, coach_configured(con()))
+      db_dep(state, "ai")
+      held <- current_review()
+      failed <- current_failure()
+      commit_state(result, current, coach_configured(con()), if (is.null(held)) NA_character_ else held$text,
+                   if (is.null(failed)) NA_character_ else failed$text)
+    })
+
+    output$coach <- shiny::renderUI({
+      db_dep(state, "ai")
+      running <- light_task$status() == "running" || deep_task$status() == "running"
+      render_coach_panel(current_review(), current_failure(), running, coach_configured(con()), ns)
+    })
+    output$scope_gaps <- shiny::renderUI({
+      db_dep(state, "ai")
+      render_scope_gaps(proposal_list(con(), "open", "ai"), ns, gaps_task$status() == "running")
+    })
+    shiny::observeEvent(input$see_prompt, {
+      prompt <- coach_inputs(con(), current_squished(), input$see_prompt, input$parent)
+      shiny::showModal(shiny::modalDialog(title = "See the prompt", size = "l", easyClose = TRUE,
+                                          shiny::tags$pre(style = "white-space:pre-wrap;font-size:12px", prompt_dialog_text(prompt)),
+                                          footer = shiny::modalButton("Close")))
+    })
+    shiny::observeEvent(input$coach_dismiss, {
+      shiny::showModal(shiny::modalDialog(title = "Dismiss with reason",
+                                          shiny::textAreaInput(ns("coach_dismiss_reason"), "Why doesn't this apply?", width = "100%"),
+                                          footer = shiny::tagList(shiny::modalButton("Cancel"),
+                                                                  shiny::actionButton(ns("coach_dismiss_confirm"), "Dismiss", class = "mb-btn mb-btn-primary"))))
+    })
+    shiny::observeEvent(input$coach_dismiss_confirm, {
+      held <- current_review()
+      shiny::req(held)
+      if (!nzchar(trimws(input$coach_dismiss_reason))) return(refusal_toast("Dismissing needs a reason."))
+      shiny::removeModal()
+      first <- if (length(held$answer$questions) > 0L) held$answer$questions[[1]]$text else "Coach review"
+      id <- insert_proposal(con(), list(task = "req_light_check", proposal_kind = "question", title = first, payload_json = "{}", llm_call_id = held$call_id))
+      dismiss_proposal(con(), id, input$coach_dismiss_reason)
+      invalidate_db(state, "ai")
+    })
+    shiny::observeEvent(input$gap_draft, {
+      draft_text <- guarded_edit(start_from_sketch(con(), input$gap_draft))
+      if (!is.null(draft_text)) {
+        clear_form()
+        shiny::updateTextAreaInput(session, "text", value = draft_text)
+        invalidate_db(state, "ai")
+      }
+    })
+    shiny::observeEvent(input$gap_dismiss, ask_dismiss(ns, input$gap_dismiss, "gap_dismiss_confirm", "gap_dismiss_reason"))
+    pending_dismiss <- shiny::reactiveVal(NULL)
+    shiny::observeEvent(input$gap_dismiss, pending_dismiss(input$gap_dismiss))
+    shiny::observeEvent(input$gap_dismiss_confirm, {
+      if (!is.null(guarded_edit({
+        dismiss_proposal(con(), pending_dismiss(), input$gap_dismiss_reason)
+        TRUE
+      }))) {
+        shiny::removeModal()
+        invalidate_db(state, "ai")
+      }
     })
 
     shiny::observe({
@@ -138,10 +265,6 @@ mod_write_server <- function(id, state, debounce_ms = 50) {
       if (!is.null(just) && !nzchar(trimws(draft()))) return(shiny::tags$span(sprintf("Committed %s.", just)))
       shiny::tags$span(commit_info()$reason)
     })
-    output$coach_note <- shiny::renderUI({
-      "No coach is configured yet. Commit runs on the gate alone and marks the requirement uncoached."
-    })
-
     outline <- shiny::reactive({
       db_dep(state, "spec")
       requirement_outline(con())
@@ -214,11 +337,22 @@ mod_write_server <- function(id, state, debounce_ms = 50) {
 
     # Core re-runs the gate here, so a stale button can't commit a failing draft.
     shiny::observeEvent(input$commit_request, {
-      written <- guarded_edit(commit_requirement(con(), input$commit_request$text, editing(), form_fields()))
+      text <- stringr::str_squish(input$commit_request$text)
+      held <- shiny::isolate(review())
+      reviewed <- !is.null(held) && identical(held$text, text)
+      written <- guarded_edit(commit_requirement(con(), text, editing(), form_fields(),
+                                                 coach_state = if (reviewed) "reviewed" else "uncoached",
+                                                 assessed_text = if (reviewed) held$text, coach_call_id = if (reviewed) held$call_id))
       if (is.null(written)) return()
+      if (reviewed) record_conflicts(con(), written$id, held$answer, held$call_id)
       last_commit(written$id)
       invalidate_db(state, written$area)
       clear_form()
+      # Scope gaps run once per session, in the background, after the first commit.
+      if (!scope_gaps_ran() && coach_configured(con())) {
+        scope_gaps_ran(TRUE)
+        gaps_task$invoke(con())
+      }
     })
     shiny::observeEvent(input$save_request, {
       written <- guarded_edit(save_draft(con(), input$save_request$text, editing(), form_fields()))
@@ -286,6 +420,6 @@ mod_write_server <- function(id, state, debounce_ms = 50) {
       if (!is.null(written)) invalidate_db(state, "model")
     })
 
-    invisible(list(gate = gate, commit_info = commit_info, editing = editing))
+    invisible(list(gate = gate, commit_info = commit_info, editing = editing, review = current_review, failure = current_failure))
   })
 }

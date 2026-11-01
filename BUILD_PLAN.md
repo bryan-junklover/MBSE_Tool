@@ -103,7 +103,7 @@ arrives.
 | Storage | DBI + RSQLite, WAL |
 | Graph | igraph |
 | LLM | ellmer (Anthropic, OpenAI, and OpenAI-compatible for LM Studio), with structured output via `type_object()` / `type_enum()` |
-| Async | `ExtendedTask` + promises (+ mirai) |
+| Async | `ExtendedTask` + promises, through ellmer's async calls (mirai only if a later task needs a worker) |
 | Hashing / JSON | digest or openssl (sha256), jsonlite with canonical output |
 | Secrets | keyring, falling back to environment variables |
 | Documents | quarto (ICD), xml2 (ReqIF), readxl / openxlsx2 (import, export) |
@@ -325,6 +325,10 @@ Artboards: *11* (chat panel), plus export buttons wherever they appear.
   the text area's value with the click, and core gates and saves that. When the coach
   arrives, `commit_requirement()` must also check `assessed_text` against this text
   in core, not only in the button's state.
+- **`load_all()` runs test helpers unless told not to.** The network guard is a helper, so
+  anything outside the tests must pass `helpers = FALSE`, or real AI calls quietly fail.
+- **A coach that can't run never locks out commit.** If the coach fails on the current text,
+  commit runs on the gate alone and marks the requirement `uncoached`.
 - **`debounce()` doesn't dedupe by value.** Keep a `last_processed` guard keyed
   on project and text.
 - **No key, no lockout.** Without a configured coach, commit runs on the gate

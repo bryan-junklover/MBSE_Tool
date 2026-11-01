@@ -120,11 +120,17 @@ render_outline <- function(outline, select_input, selected = NULL) {
   }))
 }
 
-render_status_strip <- function(counts, nav_input) {
+render_status_strip <- function(counts, nav_input, coach = NULL, usage = NULL, policy = "tiered") {
   shiny::tags$div(
     role = "status", `aria-label` = "Session status", class = "mb-status",
-    shiny::tags$button(type = "button", onclick = event_js(nav_input, list(workspace = "Analyze")),
-                       sprintf("%d unreviewed AI drafts · %d placeholders", counts$unreviewed, counts$placeholders))
+    if (!is.null(coach)) {
+      shiny::tags$span(class = NULL, "Coach: ", shiny::tags$span(class = if (!coach$local) "mb-amber-dark", if (coach$local) "local ready" else "local down"), " · ",
+                       shiny::tags$span(if (coach$cloud) "cloud ready" else "cloud off"))
+    },
+    shiny::tags$span(sprintf("Policy: %s", policy)),
+    shiny::tags$button(type = "button", onclick = event_js(nav_input, list(workspace = "Analyze", tab = "Health")),
+                       sprintf("%d unreviewed AI drafts · %d placeholders", counts$unreviewed, counts$placeholders)),
+    if (!is.null(usage)) shiny::tags$span(style = "margin-left:auto", sprintf("Today: %d calls · $%.2f", usage$calls, usage$cost))
   )
 }
 
@@ -148,5 +154,85 @@ render_findings <- function(findings) {
       }), recursive = FALSE))
     },
     shiny::tags$div(class = "mb-caption", "RULE = deterministic check")
+  )
+}
+
+# --- AI panels (handoff §5.2) ---
+
+ai_header <- function(title, source) {
+  shiny::tags$div(class = "mb-head", shiny::tags$span(class = "mb-badge-ai", "AI"), shiny::tags$b(title),
+                  shiny::tags$span(class = "mb-caption mb-push", source))
+}
+
+render_word_diff <- function(diff) {
+  shiny::tags$div(class = "mb-diff", lapply(seq_len(nrow(diff)), function(i) {
+    word <- diff$word[i]
+    shiny::tagList(switch(diff$op[i], del = shiny::tags$del(word), ins = shiny::tags$ins(word), word), " ")
+  }))
+}
+
+COACH_CRITERIA <- c(singular = "Singular", verifiable = "Verifiable", design_independent = "Design-independent",
+                    conflicts = "Conflicts", fits_scope = "Fits the scope")
+
+render_coach_panel <- function(review, failure, running, configured, ns) {
+  if (!is.null(failure)) {
+    return(shiny::tags$section(class = "mb-sketch-panel", ai_header("Coach", "couldn't run"), shiny::tags$span(failure$error),
+                               shiny::tags$span(class = "mb-caption", "You can still commit on the gate alone; it's marked uncoached.")))
+  }
+  if (is.null(review)) {
+    note <- if (running) "Checking…" else if (configured) "The coach reads a draft after it passes the gate." else
+      "No coach is configured. Commit runs on the gate alone and marks the requirement uncoached. Pick a local model in Project to turn it on."
+    return(shiny::tags$section(class = "mb-sketch-panel", ai_header("Coach", ""), shiny::tags$span(class = "mb-caption", note),
+                               shiny::tags$div(shiny::actionButton(ns("deep_check"), "Deep check (cloud)", class = "mb-btn"))))
+  }
+  answer <- review$answer
+  task <- if (grepl("deep", review$prompt_version %||% "", fixed = TRUE)) "req_deep_check" else "req_light_check"
+  shiny::tags$section(
+    class = "mb-sketch-panel",
+    ai_header("Coach", if (task == "req_deep_check") "cloud · on demand" else "local · after the gate passed"),
+    shiny::tags$div(class = "mb-card-rows", style = "font-size:12px", unlist(lapply(names(COACH_CRITERIA), function(name) {
+      value <- answer$criteria[[name]]
+      list(shiny::tags$span(COACH_CRITERIA[[name]]), shiny::tags$span(style = if (identical(value, "question")) "font-weight:600", value))
+    }), recursive = FALSE)),
+    lapply(answer$questions, function(question) {
+      shiny::tags$div(class = "mb-question", shiny::tags$span(style = "font-size:15px", question$text),
+                      if (nzchar(question$context)) shiny::tags$span(class = "mb-caption", question$context))
+    }),
+    lapply(answer$conflicts, function(conflict) {
+      shiny::tags$div(class = "mb-question",
+                      shiny::tags$span(if (is.na(conflict$requirement_id)) "Possible conflict" else sprintf("Conflict with %s", conflict$requirement_id)),
+                      shiny::tags$span(class = "mb-caption", conflict$explanation))
+    }),
+    if (identical(answer$example$status, "ok")) {
+      shiny::tags$details(shiny::tags$summary(style = "font-weight:500", "Show an example rewrite (word diff)"),
+                          render_word_diff(answer$example$diff),
+                          shiny::tags$div(class = "mb-caption", "An example only."))
+    } else if (identical(answer$example$status, "failed")) {
+      shiny::tags$div(class = "mb-caption", sprintf("The example didn't pass the gate: %s", paste(answer$example$reasons, collapse = " ")))
+    },
+    shiny::tags$div(class = "mb-term-actions",
+                    shiny::actionButton(ns("deep_check"), "Deep check (cloud)", class = "mb-btn"),
+                    shiny::actionButton(ns("coach_dismiss"), "Dismiss with reason", class = "mb-btn")),
+    shiny::tags$div(class = "mono mb-caption", style = "font-size:11px",
+                    sprintf("%s · %s · %s%s", review$provider_id %||% "", review$prompt_version %||% "",
+                            if (is.na(review$duration_ms)) "" else sprintf("%.1f s", review$duration_ms / 1000),
+                            if (isTRUE(review$cached)) " · cached by text" else ""), " ",
+                    shiny::tags$button(type = "button", class = "mb-linkish", onclick = event_js(ns("see_prompt"), task), "See the prompt"))
+  )
+}
+
+render_scope_gaps <- function(proposals, ns, running) {
+  gaps <- proposals[proposals$task == "scope_gaps", , drop = FALSE]
+  if (nrow(gaps) == 0L && !running) return(NULL)
+  shiny::tags$section(
+    class = "mb-panel",
+    shiny::tags$div(class = "mb-head", shiny::tags$b("Gaps the scope implies"), shiny::tags$span(class = "mb-caption", if (running) "Checking…" else "after your last commit")),
+    lapply(seq_len(nrow(gaps)), function(i) {
+      row <- gaps[i, ]
+      shiny::tags$div(style = "display:flex;flex-direction:column;gap:6px", shiny::tags$span(row$title),
+                      shiny::tags$div(class = "mb-term-actions",
+                                      if (row$proposal_kind == "sketch_requirement") shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", onclick = event_js(ns("gap_draft"), row$id), "Start from this in Write"),
+                                      shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", onclick = event_js(ns("gap_dismiss"), row$id), "Dismiss with reason")))
+    })
   )
 }

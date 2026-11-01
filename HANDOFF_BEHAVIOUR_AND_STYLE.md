@@ -169,7 +169,8 @@ The panel is fixed in this order:
 
 The example rewrite is re-gated. If it fails the gate, it is hidden and replaced
 with "The example didn't pass the gate: <reasons>". It is never repaired
-automatically. Numbers in an example that aren't in the draft are replaced with `[value]`.
+automatically. Numbers in an example that aren't in the draft are replaced with `[value]`, and
+that placeholder doesn't count as a gate failure for the example, since the wireframes show it.
 
 A conflict appears only if the model's quoted text matches a committed
 requirement verbatim. A paraphrased conflict is shown in the panel but not recorded.

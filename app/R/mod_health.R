@@ -108,7 +108,8 @@ render_health <- function(health, input_id) {
       health_card("AI contributions", c(
         health_row("Kept, with your note", health$ai$kept),
         health_row("Dismissed, with reason", health$ai$dismissed),
-        health_row("Unreviewed", health$ai$unreviewed)
+        health_row("Unreviewed", health$ai$unreviewed),
+        health_row("Values the model tried to invent, blocked", health$ai$invented)
       ))
     )
   )

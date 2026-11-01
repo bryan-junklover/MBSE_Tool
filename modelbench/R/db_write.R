@@ -345,6 +345,59 @@ delete_layout_item <- function(con, view_id, item_kind, item_id) {
   invisible(NULL)
 }
 
+log_llm_call <- function(con, fields) {
+  fields <- null_to_na(fields)
+  DBI::dbExecute(con, sprintf("INSERT INTO llm_call (%s) VALUES (%s)", paste(names(fields), collapse = ", "),
+                              paste(rep("?", length(fields)), collapse = ", ")), params = unname(fields))
+  DBI::dbGetQuery(con, "SELECT last_insert_rowid() AS id")$id
+}
+
+write_llm_cache <- function(con, task, key_hash, call_id) {
+  DBI::dbExecute(con, "INSERT OR REPLACE INTO llm_cache (task, key_hash, llm_call_id) VALUES (?, ?, ?)",
+                 params = list(task, key_hash, call_id))
+  invisible(NULL)
+}
+
+insert_proposal <- function(con, fields) {
+  id <- allocate_id(con, "PR")
+  fields <- null_to_na(c(list(id = id), fields))
+  DBI::dbExecute(con, sprintf("INSERT INTO ai_proposal (%s) VALUES (%s)", paste(names(fields), collapse = ", "),
+                              paste(rep("?", length(fields)), collapse = ", ")), params = unname(fields))
+  id
+}
+
+update_proposal <- function(con, id, fields) {
+  fields <- null_to_na(c(fields, list(resolved_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))))
+  sets <- paste(sprintf("%s = ?", names(fields)), collapse = ", ")
+  DBI::dbExecute(con, sprintf("UPDATE ai_proposal SET %s WHERE id = ?", sets), params = c(unname(fields), list(id)))
+  invisible(NULL)
+}
+
+insert_conflict <- function(con, requirement_a, requirement_b, explanation, llm_call_id) {
+  id <- allocate_id(con, "CF")
+  DBI::dbExecute(con, "INSERT INTO requirement_conflict (id, requirement_a, requirement_b, explanation, llm_call_id) VALUES (?, ?, ?, ?, ?)",
+                 params = null_to_na(list(id, requirement_a, requirement_b, explanation, llm_call_id)))
+  id
+}
+
+log_ai_drop <- function(con, detail) {
+  DBI::dbExecute(con, "INSERT INTO audit_log (actor, action, detail_json) VALUES ('system', 'ai_dropped', ?)",
+                 params = list(canonical_json(detail)))
+  invisible(NULL)
+}
+
+set_task_route <- function(con, task, fields) {
+  fields <- null_to_na(fields)
+  sets <- paste(sprintf("%s = ?", names(fields)), collapse = ", ")
+  DBI::dbExecute(con, sprintf("UPDATE task_route SET %s WHERE task = ?", sets), params = c(unname(fields), list(task)))
+  invisible(NULL)
+}
+
+set_provider_base_url <- function(con, provider_id, base_url) {
+  DBI::dbExecute(con, "UPDATE provider SET base_url = ? WHERE id = ?", params = list(base_url, provider_id))
+  invisible(NULL)
+}
+
 # Records evidence against the requirement's current context (SCHEMA §7).
 write_verification_record <- function(con, requirement_id, test_case_id, result, recorded_by,
                                       evidence_ref = NULL, note = NULL, id = NULL) {

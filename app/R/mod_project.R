@@ -5,7 +5,7 @@ mod_project_ui <- function(id) {
   shiny::tags$div(
     class = "mb-body",
     shiny::tags$main(
-      class = "mb-main", style = "max-width:900px",
+      class = "mb-main", style = "max-width:1200px",
       shiny::tags$section(class = "mb-panel",
                           shiny::tags$b("Project"),
                           shiny::uiOutput(ns("project_picker")),
@@ -28,7 +28,8 @@ mod_project_ui <- function(id) {
                           shiny::tags$b("ID prefixes"),
                           shiny::tags$span(class = "mb-caption", "Used for new items. Existing ids never change."),
                           shiny::uiOutput(ns("prefixes")),
-                          shiny::tags$div(shiny::actionButton(ns("save_prefixes"), "Save prefixes", class = "mb-btn")))
+                          shiny::tags$div(shiny::actionButton(ns("save_prefixes"), "Save prefixes", class = "mb-btn"))),
+      mod_ai_settings_ui("ai_settings")
     )
   )
 }

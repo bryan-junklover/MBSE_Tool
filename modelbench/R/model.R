@@ -342,7 +342,8 @@ model_health <- function(con) {
     ai = list(
       kept = count_of(con, "SELECT count(*) AS n FROM ai_proposal WHERE status = 'kept'"),
       dismissed = count_of(con, "SELECT count(*) AS n FROM ai_proposal WHERE status = 'dismissed'"),
-      unreviewed = count_of(con, "SELECT count(*) AS n FROM v_unreviewed")
+      unreviewed = count_of(con, "SELECT count(*) AS n FROM v_unreviewed"),
+      invented = count_of(con, "SELECT coalesce(sum(json_extract(payload_json, '$._invented')), 0) AS n FROM ai_proposal")
     )
   )
 }

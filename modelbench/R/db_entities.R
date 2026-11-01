@@ -36,7 +36,7 @@ ID_FORMATS <- c(
   E = "E-%02d", T = "T-%02d", VAR = "VAR-%d", LL = "LL-%d", A = "A-%03d",
   N = "N-%d", G = "G-%d", TC = "TC-%03d", VR = "VR-%04d", BL = "BL-%02d",
   PR = "PR-%04d", L = "L-%04d", V = "V-%04d", B = "B-%03d", VW = "VW-%04d",
-  CS = "CS-%04d"
+  CS = "CS-%04d", CF = "CF-%04d"
 )
 
 revisioned_kinds <- function() names(ENTITY_AREAS)
