@@ -32,6 +32,9 @@ create_project <- function(dir, name) {
 switch_project <- function(state, path) {
   old <- shiny::isolate(state$con())
   state$selected_requirement(NULL)
+  state$selected_entity(list(kind = "none", ids = character(0)))
+  state$selected_interface(NULL)
+  state$commands(new_command_stack())
   state$con(init_project_db(path))
   DBI::dbDisconnect(old)
   invalidate_db(state, DB_AREAS)

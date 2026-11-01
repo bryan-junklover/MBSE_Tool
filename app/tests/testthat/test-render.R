@@ -68,3 +68,10 @@ test_that("the first run opens the sample", {
   on.exit(DBI::dbDisconnect(con))
   expect_identical(get_setting(con, "project_name"), "Survey UAV")
 })
+
+test_that("the diagram widget keeps blank positions and single selections in shape", {
+  widget <- mbdiagram(list(nodes = data.frame(id = "C-1", x = NA_real_), selected = as.list("C-1"), tool = "select"))
+  parsed <- jsonlite::fromJSON(widget$x$json, simplifyVector = FALSE)
+  expect_null(parsed$nodes[[1]]$x)
+  expect_identical(parsed$selected, list("C-1"))
+})

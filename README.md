@@ -14,6 +14,12 @@ Rscript tools/lint.R
 Rscript tools/build_sample_project.R survey_uav.sqlite
 ```
 
+Widgets are local packages, so `renv.lock` leaves them out. Install them after a restore, and after changing one:
+
+```bash
+Rscript tools/install_widgets.R
+```
+
 ```bash
 Rscript -e 'shiny::runApp("app")'
 ```

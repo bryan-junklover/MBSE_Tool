@@ -1,0 +1,50 @@
+<!doctype html><meta charset=utf-8><title>spike</title><style>body{margin:0;font:13px system-ui}#p{width:1300px;height:800px;overflow:auto;border:1px solid #ccc}</style>
+<div id=p></div><pre id=o></pre>
+<script src=joint.min.js></script><script src=elk.bundled.js></script>
+<script>
+const {dia,shapes}=joint;
+const Block=dia.Element.define('mb.Block',{size:{width:170,height:80},attrs:{body:{width:'calc(w)',height:'calc(h)',fill:'#fff',stroke:'#9A9DA3',rx:4},label:{x:'calc(0.5*w)',y:'calc(0.5*h)',textAnchor:'middle',textVerticalAnchor:'middle',fontSize:13,fontWeight:600}},
+ ports:{groups:{in:{position:'left',attrs:{portBody:{magnet:'passive',width:10,height:10,x:-5,y:-5,fill:'#fff',stroke:'#1C1D1F',strokeWidth:2}},markup:[{tagName:'rect',selector:'portBody'}]},out:{position:'right',attrs:{portBody:{magnet:true,width:10,height:10,x:-5,y:-5,fill:'#fff',stroke:'#1C1D1F',strokeWidth:2}},markup:[{tagName:'rect',selector:'portBody'}]}}}},
+ {markup:[{tagName:'rect',selector:'body'},{tagName:'text',selector:'label'}]});
+function synth(n,pp){const nodes=[],edges=[];for(let i=0;i<n;i++){const ports=[];for(let k=0;k<pp;k++)ports.push({id:'p'+i+'_'+k,group:k%2?'out':'in'});nodes.push({id:'n'+i,ports});}
+ for(let i=0;i<n;i++)for(let k=1;k<pp;k+=2){const j=(i+1+((i*7+k*13)%Math.min(n-1,9)))%n;const t=(k-1+ (i%2)*0);edges.push({id:'e'+i+'_'+k,s:'n'+i,sp:'p'+i+'_'+k,t:'n'+j,tp:'p'+j+'_'+t});}
+ // one link per input
+ const seen=new Set();return{nodes,edges:edges.filter(e=>{if(seen.has(e.tp))return false;seen.add(e.tp);return true})};}
+const out={};window.R=out;
+async function run(){
+ const m=synth(150,4);out.ports=m.nodes.reduce((a,n)=>a+n.ports.length,0);out.links=m.edges.length;
+ const elk=new ELK();let t=performance.now();
+ const lay=await elk.layout({id:'root',layoutOptions:{'elk.algorithm':'layered','elk.direction':'RIGHT','elk.layered.spacing.nodeNodeBetweenLayers':'70','elk.spacing.nodeNode':'30','elk.portConstraints':'FIXED_SIDE'},
+  children:m.nodes.map(n=>({id:n.id,width:170,height:80,layoutOptions:{'elk.portConstraints':'FIXED_SIDE'},ports:n.ports.map(p=>({id:p.id,width:10,height:10,layoutOptions:{'elk.port.side':p.group=='in'?'WEST':'EAST'}}))})),
+  edges:m.edges.map(e=>({id:e.id,sources:[e.sp],targets:[e.tp]}))});
+ out.elk_ms=Math.round(performance.now()-t);
+ const pos=Object.fromEntries(lay.children.map(c=>[c.id,c]));
+ const graph=new dia.Graph({}, {cellNamespace:{mb:{Block},standard:shapes.standard}});
+ const paper=new dia.Paper({el:document.getElementById('p'),model:graph,width:lay.width+50,height:lay.height+50,gridSize:8,async:false,sorting:dia.Paper.sorting.NONE,cellViewNamespace:{mb:{Block},standard:shapes.standard},defaultLink:()=>new shapes.standard.Link(),
+  linkPinning:false,snapLinks:{radius:20},validateConnection:(a,ma,b,mb)=>!!mb&&a!==b&&mb.getAttribute('port-group')==='in',interactive:{linkMove:false}});
+ window.paper=paper;window.graph=graph;
+ t=performance.now();
+ const cells=m.nodes.map(n=>new Block({id:n.id,position:{x:pos[n.id].x,y:pos[n.id].y},attrs:{label:{text:n.id}},ports:{items:n.ports.map(p=>({id:p.id,group:p.group}))}}));
+ const links=m.edges.map(e=>new shapes.standard.Link({id:e.id,source:{id:e.s,port:e.sp},target:{id:e.t,port:e.tp},connector:{name:'rounded'},attrs:{line:{stroke:'#6B6E74',strokeWidth:2}}}));
+ graph.resetCells(cells.concat(links));
+ out.render_ms=Math.round(performance.now()-t);
+ await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+ out.render_paint_ms=Math.round(performance.now()-t);
+ // selection event
+ let sel=null;paper.on('element:pointerclick',v=>sel=v.model.id);
+ // drag: move the busiest element through 60 frames
+ const el=cells[75];const times=[];const start=el.position();
+ for(let i=0;i<60;i++){const a=performance.now();el.position(start.x+i*2,start.y+(i%10));await new Promise(r=>requestAnimationFrame(r));times.push(performance.now()-a);}
+ times.sort((a,b)=>a-b);out.drag_median_ms=Math.round(times[30]);out.drag_p95_ms=Math.round(times[57]);
+ // Same drag at multiple element batch: real pointer drag handled in the pane
+ // connect validation
+ const free=cells[0].getPorts().find(p=>p.group==='in');
+ out.ok=true;
+ // drill down: swap graph to a sub-level of 12
+ t=performance.now();const sub=synth(12,4);const sc=sub.nodes.map((n,i)=>new Block({id:'s'+n.id,position:{x:40+(i%4)*240,y:40+Math.floor(i/4)*140},attrs:{label:{text:n.id}},ports:{items:n.ports.map(p=>({id:'s'+p.id,group:p.group}))}}));
+ window.topCells=()=>graph.toJSON();const saved=graph.toJSON();graph.resetCells(sc);out.drill_in_ms=Math.round(performance.now()-t);
+ t=performance.now();graph.fromJSON(saved);out.drill_out_ms=Math.round(performance.now()-t);
+ document.getElementById('o').textContent=JSON.stringify(out);
+}
+run().catch(e=>{out.err=String(e);document.getElementById('o').textContent=out.err});
+</script>

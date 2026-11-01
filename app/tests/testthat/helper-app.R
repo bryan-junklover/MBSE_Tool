@@ -2,6 +2,7 @@
 ROOT <- normalizePath(testthat::test_path("..", "..", ".."), mustWork = TRUE)
 pkgload::load_all(file.path(ROOT, "modelbench"), quiet = TRUE, helpers = FALSE, export_all = TRUE)
 source(file.path(ROOT, "modelbench", "tests", "testthat", "helper-00-guard.R"), local = globalenv())
+library(mbdiagram)
 for (file in list.files(file.path(ROOT, "app", "R"), full.names = TRUE)) source(file, local = globalenv())
 
 local_sample_state <- function(env = parent.frame()) {

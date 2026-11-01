@@ -200,6 +200,10 @@ Each change card is one change set, titled by its first entity.
 entity's baselined `data_json` back through the write path as a new revision.
 Rollback never rewrites history.
 
+**Undo.** `undo_command()` works the same way as rollback: it writes new revisions restoring the
+state before a change set, and redo undoes that new change set. Layout moves undo through a
+snapshot, since layout isn't revisioned.
+
 ## 7. Evidence staleness
 
 A verification record is current only while everything it depended on is

@@ -61,7 +61,7 @@ baselineable_entities <- function(con) {
 }
 
 # The (kind, id, rev) entries a verification record depends on (SCHEMA §7).
-# Analysis inputs (Phase 2) and state machine content (Phase 4) join this list.
+# State machine content (Phase 4) joins this list.
 verification_context <- function(con, requirement_id) {
   requirement <- DBI::dbGetQuery(con, "SELECT 'requirement' AS kind, id, rev FROM requirement WHERE id = ?",
                                  params = list(requirement_id))
@@ -77,7 +77,8 @@ verification_context <- function(con, requirement_id) {
      WHERE v.owner_kind = 'element' AND l.link_type = 'satisfied_by'
        AND l.source_kind = 'requirement' AND l.source_id = ?",
                             params = list(requirement_id))
-  context <- rbind(requirement, elements, values)
+  context <- rbind(requirement, elements, values, requirement_analysis_inputs(con, requirement_id))
+  context <- context[!duplicated(context[c("kind", "id")]), , drop = FALSE]
   context <- context[order(context$kind, context$id, method = "radix"), , drop = FALSE]
   lapply(seq_len(nrow(context)), function(i) as.list(context[i, , drop = FALSE]))
 }

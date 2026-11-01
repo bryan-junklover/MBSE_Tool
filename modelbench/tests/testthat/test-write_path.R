@@ -111,8 +111,9 @@ test_that("a delete writes final revisions for everything that goes with it", {
   write_property_def(con, "PD-1", list(name = "mass", label = "Mass", value_type = "number"))
   a <- new_element(con, "a")$id
   b <- new_element(con, "b")$id
-  out <- write_port(con, fields = list(element_id = a, name = "o", direction = "out"))$id
-  inp <- write_port(con, fields = list(element_id = b, name = "i", direction = "in"))$id
+  write_interface(con, "IF-1", list(name = "Data", flow_type = "data"))
+  out <- write_port(con, fields = list(element_id = a, name = "o", direction = "out", interface_id = "IF-1"))$id
+  inp <- write_port(con, fields = list(element_id = b, name = "i", direction = "in", interface_id = "IF-1"))$id
   connector <- write_connector(con, fields = list(source_port_id = out, target_port_id = inp))$id
   value <- write_property_value(con, fields = list(owner_kind = "element", owner_id = a, property_def_id = "PD-1"))$id
   link <- write_link(con, fields = list(link_type = "traces_to", source_kind = "element", source_id = a,

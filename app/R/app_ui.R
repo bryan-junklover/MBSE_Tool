@@ -52,15 +52,47 @@ app_ui <- function() {
             bslib::nav_panel_hidden("Traceability", phase_placeholder("Traceability", 4L))
           )
         ),
-        bslib::nav_panel_hidden("Model", phase_placeholder("The model workspace", 2L)),
+        bslib::nav_panel_hidden(
+          "Model",
+          shiny::tags$div(class = "mb-tabbar", shiny::uiOutput("model_tabs")),
+          bslib::navset_hidden(
+            id = "model_tab", selected = "Structure",
+            bslib::nav_panel_hidden("Structure", mod_model_ui("model")),
+            bslib::nav_panel_hidden("Flows", phase_placeholder("The flows view", 4L)),
+            bslib::nav_panel_hidden("Functional", phase_placeholder("The functional view", 4L)),
+            bslib::nav_panel_hidden("Interfaces", mod_interfaces_ui("interfaces"))
+          )
+        ),
         bslib::nav_panel_hidden("Behavior", phase_placeholder("The behavior workspace", 6L)),
-        bslib::nav_panel_hidden("Analyze", phase_placeholder("Health", 2L))
+        bslib::nav_panel_hidden(
+          "Analyze",
+          shiny::tags$div(class = "mb-tabbar", shiny::uiOutput("analyze_tabs")),
+          bslib::navset_hidden(
+            id = "analyze_tab", selected = "Health",
+            bslib::nav_panel_hidden("Health", mod_health_ui("health")),
+            bslib::nav_panel_hidden("Review queue", phase_placeholder("The review queue", 3L)),
+            bslib::nav_panel_hidden("Baselines & impact", phase_placeholder("Baselines and impact", 5L))
+          )
+        )
       )
     )
   )
 }
 
-WRITE_TABS <- c("Draft", "Specification", "Traceability")
+WORKSPACE_TABS <- list(
+  Write = c("Draft", "Specification", "Traceability"),
+  Model = c("Structure", "Flows", "Functional", "Interfaces"),
+  Analyze = c("Health", "Review queue", "Baselines & impact")
+)
+TAB_SETS <- c(Write = "write_tab", Model = "model_tab", Analyze = "analyze_tab")
+
+render_tab_bar <- function(workspace, active) {
+  shiny::tags$div(role = "tablist", `aria-label` = workspace, class = "mb-segmented", lapply(WORKSPACE_TABS[[workspace]], function(tab) {
+    on <- tolower(as.character(identical(tab, active)))
+    shiny::tags$button(type = "button", role = "tab", `aria-pressed` = on, `aria-selected` = on,
+                       onclick = event_js("nav_click", list(workspace = workspace, tab = tab)), tab)
+  }))
+}
 
 app_server <- function(input, output, session) {
   dir <- workspace_dir()
@@ -82,20 +114,15 @@ app_server <- function(input, output, session) {
     render_status_strip(status_counts(state$con()), "nav_click")
   })
   output$top_nav <- shiny::renderUI(render_top_nav(state$nav()$workspace, "nav_click"))
-  output$write_tabs <- shiny::renderUI({
-    active <- state$nav()$tab
-    shiny::tags$div(role = "tablist", `aria-label` = "Write", class = "mb-segmented", lapply(WRITE_TABS, function(tab) {
-      shiny::tags$button(type = "button", role = "tab", `aria-pressed` = tolower(as.character(identical(tab, active))),
-                         `aria-selected` = tolower(as.character(identical(tab, active))),
-                         onclick = event_js("nav_click", list(workspace = "Write", tab = tab)), tab)
-    }))
-  })
+  # The tab last used in each workspace, kept when moving between them.
+  tabs <- shiny::reactiveVal(list(Write = "Draft", Model = "Structure", Analyze = "Health"))
+  output$write_tabs <- shiny::renderUI(render_tab_bar("Write", tabs()$Write))
+  output$model_tabs <- shiny::renderUI(render_tab_bar("Model", tabs()$Model))
+  output$analyze_tabs <- shiny::renderUI(render_tab_bar("Analyze", tabs()$Analyze))
 
   apply_nav <- function(target) {
-    tab <- if (is.null(target$tab)) shiny::isolate(state$nav()$tab) else target$tab
-    if (is.null(tab) || !tab %in% WRITE_TABS) tab <- "Draft"
     if (!target$workspace %in% WORKSPACES) return(invisible(NULL))
-    state$nav(list(workspace = target$workspace, tab = tab))
+    state$nav(list(workspace = target$workspace, tab = target$tab))
   }
   shiny::observeEvent(input$nav_click, apply_nav(input$nav_click))
   # Saving starts only after the restore, or the startup default would overwrite it.
@@ -106,10 +133,19 @@ app_server <- function(input, output, session) {
   })
   shiny::observe({
     target <- state$nav()
-    shiny::updateTabsetPanel(session, "workspace", selected = target$workspace)
-    if (!is.null(target$tab)) shiny::updateTabsetPanel(session, "write_tab", selected = target$tab)
-    if (nav_restored()) session$sendCustomMessage("mb_nav_save", list(project = shiny::isolate(basename(DBI::dbGetInfo(state$con())$dbname)),
-                                                                      workspace = target$workspace, tab = target$tab))
+    workspace <- target$workspace
+    known <- shiny::isolate(tabs())
+    if (!is.null(target$tab) && target$tab %in% WORKSPACE_TABS[[workspace]]) {
+      known[[workspace]] <- target$tab
+      tabs(known)
+    }
+    shiny::updateTabsetPanel(session, "workspace", selected = workspace)
+    tab <- known[[workspace]]
+    if (!is.null(tab)) shiny::updateTabsetPanel(session, TAB_SETS[[workspace]], selected = tab)
+    if (nav_restored()) {
+      session$sendCustomMessage("mb_nav_save", list(project = shiny::isolate(basename(DBI::dbGetInfo(state$con())$dbname)),
+                                                    workspace = workspace, tab = tab))
+    }
   })
   # The app opens on Write unless this project remembers somewhere else.
   shiny::observe({
@@ -120,4 +156,7 @@ app_server <- function(input, output, session) {
   mod_project_server("project", state, dir)
   mod_write_server("write", state)
   mod_spec_server("spec", state)
+  mod_model_server("model", state)
+  mod_interfaces_server("interfaces", state)
+  mod_health_server("health", state)
 }

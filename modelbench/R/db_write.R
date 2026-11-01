@@ -66,7 +66,13 @@ validate_entity <- function(con, kind, id, row, existing = NULL) {
       parent_chain_has(con, kind, row$parent_id, id)) {
     refuse("Can't save ", id, ": its parent ", row$parent_id, " would make a cycle.")
   }
+  if (kind == "connector") {
+    check <- check_connector(con, row$source_port_id, row$target_port_id)
+    if (!check$ok) refuse(check$reason)
+  }
   if (kind == "property_value") {
+    unit_problem <- check_value_unit(con, row$property_def_id, row$unit)
+    if (!is.null(unit_problem)) refuse(unit_problem)
     if (!row$owner_kind %in% PROPERTY_OWNER_KINDS || !polymorphic_exists(con, row$owner_kind, row$owner_id)) {
       refuse("Can't save ", id, ": owner ", row$owner_kind, " ", row$owner_id, " doesn't exist.")
     }
@@ -305,6 +311,37 @@ insert_triage_row <- function(con, source_name, row_no, raw_text, raw_json, gate
 update_triage_row <- function(con, id, status, requirement_id = NULL) {
   DBI::dbExecute(con, "UPDATE import_triage SET status = ?, requirement_id = ? WHERE id = ?",
                  params = null_to_na(list(status, requirement_id, id)))
+  invisible(NULL)
+}
+
+upsert_analysis_result <- function(con, analysis, scope_id, value, unit, status, inputs_hash, detail_json) {
+  DBI::dbExecute(con, "
+    INSERT INTO analysis_result (analysis, scope_id, value, unit, status, inputs_hash, detail_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (analysis, scope_id) DO UPDATE SET value = excluded.value, unit = excluded.unit, status = excluded.status,
+      inputs_hash = excluded.inputs_hash, detail_json = excluded.detail_json,
+      computed_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')",
+    params = null_to_na(list(analysis, scope_id, value, unit, status, inputs_hash, detail_json)))
+  invisible(NULL)
+}
+
+# Positions aren't revisioned: moving a box isn't a model change (SCHEMA §4).
+save_layout <- function(con, view_id, items) {
+  for (i in seq_len(nrow(items))) {
+    DBI::dbExecute(con, "
+      INSERT INTO layout (view_id, item_kind, item_id, x, y, w, h, extra_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (view_id, item_kind, item_id) DO UPDATE SET x = excluded.x, y = excluded.y,
+        w = coalesce(excluded.w, layout.w), h = coalesce(excluded.h, layout.h),
+        extra_json = coalesce(excluded.extra_json, layout.extra_json)",
+      params = list(view_id, items$item_kind[i], items$item_id[i], items$x[i], items$y[i],
+                    items$w[i], items$h[i], items$extra_json[i]))
+  }
+  invisible(NULL)
+}
+
+delete_layout_item <- function(con, view_id, item_kind, item_id) {
+  DBI::dbExecute(con, "DELETE FROM layout WHERE view_id = ? AND item_kind = ? AND item_id = ?",
+                 params = list(view_id, item_kind, item_id))
   invisible(NULL)
 }
 

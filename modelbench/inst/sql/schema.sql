@@ -539,6 +539,13 @@ CREATE TABLE IF NOT EXISTS view_def (
   is_builtin      INTEGER NOT NULL DEFAULT 0 CHECK (is_builtin IN (0,1))
 );
 
+-- Built-in views, seeded on every open (handoff §5.4).
+INSERT OR IGNORE INTO view_def (id, name, view_kind, filter_json, is_builtin) VALUES
+ ('VW-all', 'All components', 'structure', '{"kinds":["component"]}', 1),
+ ('VW-budget', 'Power & mass budget', 'structure', '{"kinds":["component"],"property":{"name":"mass","op":">","value":0}}', 1),
+ ('VW-software', 'Software only', 'structure', '{"kinds":["component"],"stereotypes":["SW"]}', 1),
+ ('VW-trl', 'TRL below 6', 'structure', '{"kinds":["component"],"property":{"name":"trl","op":"<","value":6}}', 1);
+
 CREATE TABLE IF NOT EXISTS layout (
   view_id    TEXT NOT NULL REFERENCES view_def(id) ON DELETE CASCADE,
   item_kind  TEXT NOT NULL CHECK (item_kind IN ('element','port','connector','sm_state','act_node')),

@@ -8,6 +8,9 @@ new_app_state <- function(con) {
     con = shiny::reactiveVal(con),
     revisions = do.call(shiny::reactiveValues, stats::setNames(as.list(rep(0L, length(DB_AREAS))), DB_AREAS)),
     selected_requirement = shiny::reactiveVal(NULL),
+    selected_entity = shiny::reactiveVal(list(kind = "none", ids = character(0))),
+    selected_interface = shiny::reactiveVal(NULL),
+    commands = shiny::reactiveVal(new_command_stack()),
     open_in_write = shiny::reactiveVal(NULL),
     nav = shiny::reactiveVal(list(workspace = "Write", tab = "Draft"))
   )
@@ -45,4 +48,20 @@ event_js <- function(input_id, value) {
   sprintf("Shiny.setInputValue(%s, %s, {priority: 'event'})",
           jsonlite::toJSON(input_id, auto_unbox = TRUE),
           jsonlite::toJSON(value, auto_unbox = TRUE))
+}
+
+# Runs a model edit that returns a change set: a refusal is a toast, a success can be undone.
+model_edit <- function(state, code, label = "edit") {
+  written <- guarded_edit(code)
+  if (is.null(written)) return(NULL)
+  change_set <- if (is.list(written)) written$change_set else written
+  state$commands(push_command(shiny::isolate(state$commands()), change_command(change_set, label)))
+  invalidate_db(state, c("model", "spec"))
+  written
+}
+
+# An input that reports its value when the field is left, not on every keystroke.
+change_js <- function(input_id, fields) {
+  sprintf("Shiny.setInputValue('%s', Object.assign(%s, {value: this.value, n: Math.random()}), {priority: 'event'})",
+          input_id, jsonlite::toJSON(fields, auto_unbox = TRUE))
 }

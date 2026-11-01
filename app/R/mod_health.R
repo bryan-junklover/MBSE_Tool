@@ -1,0 +1,150 @@
+# Analyze › Health: readiness and model health, computed with no AI calls (handoff §5.10).
+
+mod_health_ui <- function(id) {
+  ns <- shiny::NS(id)
+  shiny::tagList(
+    shiny::tags$div(class = "mb-tabbar",
+                    shiny::tags$span(class = "mb-caption", "Computed from the model. This page makes no AI calls."),
+                    shiny::tags$div(class = "mb-actions", shiny::actionButton(ns("recompute"), "Recompute", class = "mb-btn"))),
+    shiny::uiOutput(ns("page"))
+  )
+}
+
+health_link <- function(label, target, input_id, gap = FALSE) {
+  shiny::tags$button(type = "button", class = paste("mb-linkish", if (gap) "mb-gap"), onclick = event_js(input_id, target), label)
+}
+
+health_row <- function(label, value, target = NULL, input_id = NULL) {
+  problem <- !is.null(target) && value > 0L
+  list(if (problem) health_link(label, target, input_id, TRUE) else shiny::tags$span(label),
+       shiny::tags$span(class = paste("mono", if (problem) "mb-gap"), value))
+}
+
+health_card <- function(title, rows) {
+  shiny::tags$section(class = "mb-card", shiny::tags$div(class = "mb-label", title),
+                      shiny::tags$div(class = "mb-card-rows", rows))
+}
+
+# Where each kind of blocker gets fixed.
+blocker_target <- function(kind, id, owner_kind = NA, owner_id = NA) {
+  if (kind == "interface_field" || identical(owner_kind, "interface")) return(list(place = "interface", id = if (is.na(owner_id)) id else owner_id))
+  if (kind == "property_value" && identical(owner_kind, "element")) return(list(place = "element", id = owner_id))
+  if (kind == "element") return(list(place = "element", id = id))
+  list(place = "behavior", id = id)
+}
+
+render_health <- function(health, input_id) {
+  blockers <- health$blockers
+  count <- nrow(blockers$placeholders) + nrow(blockers$unreviewed)
+  place_links <- lapply(seq_len(nrow(blockers$placeholders)), function(i) {
+    row <- blockers$placeholders[i, ]
+    health_link(row$text, blocker_target(row$entity_kind, row$entity_id, row$owner_kind, row$owner_id), input_id)
+  })
+  draft_links <- lapply(seq_len(nrow(blockers$unreviewed)), function(i) {
+    row <- blockers$unreviewed[i, ]
+    health_link(sprintf("%s · %s", row$label, gsub("_", " ", row$entity_kind)), blocker_target(row$entity_kind, row$entity_id), input_id)
+  })
+  group <- function(title, links, note = NULL) {
+    shiny::tags$div(style = "display:flex;flex-direction:column;gap:6px", shiny::tags$b(title), links,
+                    if (!is.null(note)) shiny::tags$span(class = "mb-caption", note))
+  }
+  draft_note <- sprintf("%d requirement drafts also contain placeholders. Drafts can't be committed and aren't part of a baseline.",
+                        blockers$draft_placeholders)
+  spec <- list(place = "spec")
+  structure <- list(place = "structure")
+  shiny::tags$div(
+    class = "mb-health",
+    if (count == 0L) {
+      shiny::tags$section(class = "mb-banner mb-ready", shiny::tags$h1("Ready to baseline"))
+    } else {
+      shiny::tags$section(
+        class = "mb-banner",
+        shiny::tags$div(class = "mb-head", shiny::tags$h1("The next baseline can't be created yet"),
+                        shiny::tags$span(class = "mb-gap", style = "font-weight:500", sprintf("%d blockers", count)),
+                        shiny::tags$span(class = "mb-caption", "A baseline only holds what an engineer decided.")),
+        shiny::tags$div(class = "mb-banner-groups",
+                        if (length(place_links) > 0L) group(sprintf("%d placeholders", length(place_links)), place_links, draft_note),
+                        if (length(draft_links) > 0L) group(sprintf("%d unreviewed AI drafts, each needs your note", length(draft_links)), draft_links))
+      )
+    },
+    shiny::tags$div(
+      class = "mb-cards",
+      health_card("Requirements", c(
+        health_row("Committed", health$requirements$committed),
+        health_row("Pass the gate", health$requirements$passing),
+        health_row("Fail the gate", health$requirements$failing, spec, input_id),
+        health_row("Committed without a coach review", health$requirements$uncoached),
+        health_row("Committed but unallocated", health$requirements$unallocated, spec, input_id),
+        health_row("No verification method", health$requirements$no_verification, spec, input_id)
+      )),
+      health_card("Architecture", c(
+        health_row("Components", health$architecture$components),
+        health_row("Unconnected ports", health$architecture$unconnected_ports, structure, input_id),
+        health_row("Components with no requirements", health$architecture$no_requirements, structure, input_id),
+        health_row("Interfaces", health$architecture$interfaces),
+        health_row("Gate findings", health$architecture$gate_findings, structure, input_id)
+      )),
+      health_card("Functional", c(
+        health_row("Functions", health$functional$functions),
+        health_row("Unallocated", health$functional$unallocated)
+      )),
+      health_card("Behavior", c(
+        health_row("Scenarios", health$behavior$scenarios),
+        health_row("Messages using a missing field", health$behavior$missing_fields),
+        health_row("Unhandled event/state pairs", health$behavior$unhandled)
+      )),
+      health_card("Budgets (roll-up)", c(
+        unlist(lapply(seq_len(nrow(health$budgets)), function(i) {
+          budget <- health$budgets[i, ]
+          list(shiny::tags$span(budget$label),
+               shiny::tags$span(class = paste("mono", if (!budget$pass) "mb-gap"), sprintf("%s%s", budget$text, if (budget$pass) "" else " · FAIL")))
+        }), recursive = FALSE),
+        unlist(lapply(seq_len(nrow(health$analyses)), function(i) {
+          row <- health$analyses[i, ]
+          list(shiny::tags$span(class = if (!row$pass) "mb-gap", term_to_title(row$analysis)),
+               shiny::tags$span(class = paste("mono", if (!row$pass) "mb-gap"), sprintf("%s%s", row$text, if (row$pass) "" else " · FAIL")))
+        }), recursive = FALSE)
+      )),
+      health_card("AI contributions", c(
+        health_row("Kept, with your note", health$ai$kept),
+        health_row("Dismissed, with reason", health$ai$dismissed),
+        health_row("Unreviewed", health$ai$unreviewed)
+      ))
+    )
+  )
+}
+
+mod_health_server <- function(id, state) {
+  shiny::moduleServer(id, function(input, output, session) {
+    ns <- session$ns
+    con <- state$con
+    health <- shiny::reactive({
+      db_dep(state, "model")
+      db_dep(state, "spec")
+      db_dep(state, "behavior")
+      db_dep(state, "ai")
+      input$recompute
+      model_health(con())
+    })
+    output$page <- shiny::renderUI(render_health(health(), ns("go")))
+
+    shiny::observeEvent(input$go, {
+      target <- input$go
+      switch(
+        target$place,
+        spec = go_to(state, "Write", "Specification"),
+        structure = go_to(state, "Model", "Structure"),
+        element = {
+          state$selected_entity(list(kind = "element", ids = target$id))
+          go_to(state, "Model", "Structure")
+        },
+        interface = {
+          state$selected_interface(target$id)
+          go_to(state, "Model", "Interfaces")
+        },
+        go_to(state, "Behavior")
+      )
+    })
+    invisible(list(health = health))
+  })
+}
