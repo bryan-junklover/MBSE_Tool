@@ -342,7 +342,7 @@ mod_model_server <- function(id, state, mode = "structure") {
       stack <- guarded_edit(action(con(), state$commands()))
       if (is.null(stack)) return(invisible(NULL))
       state$commands(stack)
-      invalidate_db(state, c("model", "spec"))
+      invalidate_db(state, c("model", "spec", "behavior"))
       redraw(redraw() + 1L)
     }
     shiny::observeEvent(input$undo, run_stack(undo_command))

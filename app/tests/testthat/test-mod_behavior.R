@@ -1,0 +1,125 @@
+options(modelbench.no_keyring = TRUE)
+
+test_that("the sequence view draws amber, AI and placeholder steps, and selects by click", {
+  state <- local_sample_state()
+  con <- shiny::isolate(state$con())
+  steps <- scenario_steps(con, "SC-002")
+  html <- html_of(seqview(scenario_lifelines(con, "SC-002"), steps, "ST-08", "pick"))
+  expect_match(html, "var(--gap-stroke)", fixed = TRUE)
+  expect_match(html, "var(--ai)", fixed = TRUE)
+  expect_match(html, "opt [operator aborts]", fixed = TRUE)
+  expect_match(html, "Shiny.setInputValue(&quot;pick&quot;, &quot;ST-01&quot;", fixed = TRUE)
+  steps$timing_state[1] <- "placeholder"
+  expect_match(html_of(seqview(scenario_lifelines(con, "SC-002"), steps)), "gnss_valid = false ([value] s)", fixed = TRUE)
+  expect_match(html_of(seqview(scenario_lifelines(con, "SC-002")[0, ], steps[0, ])), "No lifelines", fixed = TRUE)
+})
+
+test_that("Scenarios picks, edits, reorders and offers the missing field", {
+  state <- local_sample_state()
+  shiny::testServer(mod_scenarios_server, args = list(state = state), {
+    session$flushReact()
+    expect_identical(session$getReturned()$scenario()$id, "SC-001")
+    session$setInputs(pick = "SC-002")
+    expect_identical(session$getReturned()$view_kind(), "sequence")
+    session$setInputs(step_field = list(id = "ST-06", field = "label", value = "INS position"))
+    expect_identical(read_entity(con(), "seq_step", "ST-06")$label, "INS position")
+    session$setInputs(step_field = list(id = "ST-06", field = "label", value = " "))
+    expect_identical(read_entity(con(), "seq_step", "ST-06")$label, "INS position")
+    session$setInputs(move_step = list(id = "ST-02", by = -1L))
+    expect_identical(session$getReturned()$steps()$id[1:2], c("ST-02", "ST-01"))
+    session$setInputs(add_field = list(interface = "IF-004", field = "abort"))
+    expect_identical(scenario_consistency(con(), "SC-002")$mapped, 8L)
+    session$setInputs(pick = "SC-003")
+    expect_identical(session$getReturned()$view_kind(), "activity")
+    session$setInputs(add_node = "decision")
+    expect_identical(sum(activity_nodes(con(), "SC-003")$node_kind == "decision"), 3L)
+    session$setInputs(activity_event = list(type = "connect", source_id = "N-1", target_id = "N-8"))
+    expect_identical(nrow(activity_edges(con(), "SC-003")), 10L)
+  })
+})
+
+test_that("an unreviewed step needs a note to be reviewed", {
+  state <- local_sample_state()
+  shiny::testServer(mod_scenarios_server, args = list(state = state), {
+    session$setInputs(pick = "SC-002", select_step = "ST-11", review_step = list(note = " "))
+    expect_identical(read_entity(con(), "seq_step", "ST-11")$review_state, "unreviewed")
+    session$setInputs(review_step = list(note = "The operator needs the acknowledgement"))
+    expect_identical(read_entity(con(), "seq_step", "ST-11")$review_state, "reviewed")
+  })
+})
+
+test_that("the simulator runs from buttons and the checks stay live", {
+  state <- local_sample_state()
+  shiny::testServer(mod_machines_server, args = list(state = state), {
+    session$setInputs(machine = "SM-001")
+    session$flushReact()
+    sim_now <- session$getReturned()$sim
+    expect_identical(sim_now()$current, "S-DIS")
+    session$setInputs(fire_event = "arm")
+    expect_identical(sim_now()$current, "S-ARM")
+    session$setInputs(fire_event = "landed")
+    expect_identical(sim_now()$current, "S-ARM")
+    expect_match(sim_now()$trace[[2]]$note, "ignored")
+    session$setInputs(fire_event = "takeoff")
+    session$setInputs(fire_event = "alt_reached")
+    # Firing uses the value the assertion's script sets.
+    session$setInputs(fire_event = "gnss_lost")
+    expect_identical(sim_now()$current, "S-RTH")
+    expect_equal(sim_now()$clock, 3)
+    session$setInputs(reset = 1)
+    expect_identical(sim_now()$current, "S-DIS")
+    session$setInputs(set_variable = list(name = "soc", value = "12"))
+    expect_equal(sim_now()$variables$soc, 12)
+    session$setInputs(set_variable = list(name = "gnss_valid", value = "maybe"))
+    expect_true(sim_now()$variables$gnss_valid)
+    expect_identical(session$getReturned()$assertions()$live_result, "pass")
+    session$setInputs(run_all = 1)
+    expect_true(session$getReturned()$assertions()$current)
+  })
+})
+
+test_that("completeness offers both ways out, and edits go through the gate", {
+  state <- local_sample_state()
+  shiny::testServer(mod_machines_server, args = list(state = state), {
+    session$setInputs(machine = "SM-001")
+    session$setInputs(pair_ignore = list(state = "S-LND", event = "E-06"), ignore_note = " ", ignore_confirm = 1)
+    expect_identical(nrow(unhandled_pairs(con(), "SM-001")), 3L)
+    session$setInputs(ignore_note = "Already landing", ignore_confirm = 2)
+    expect_identical(nrow(unhandled_pairs(con(), "SM-001")), 2L)
+    session$setInputs(pair_transition = list(state = "S-HLD", event = "E-05"), new_event = "E-05", new_target = "S-RTH", transition_confirm = 1)
+    expect_identical(nrow(unhandled_pairs(con(), "SM-001")), 1L)
+    session$setInputs(transition_field = list(id = "T-05", field = "guard_expr", value = "nope == 1"))
+    expect_identical(read_entity(con(), "sm_transition", "T-05")$guard_expr, "gnss_valid == false")
+    session$setInputs(transition_field = list(id = "T-09", field = "hold", value = "10"))
+    expect_identical(read_entity(con(), "sm_transition", "T-09")$hold_state, "set")
+    session$setInputs(scope = list(state = "S-ARM", event = "E-06", on = TRUE))
+    expect_identical(nrow(unhandled_pairs(con(), "SM-001")), 2L)
+    session$setInputs(scope = list(state = "S-ARM", event = "E-06", on = FALSE))
+    expect_identical(nrow(unhandled_pairs(con(), "SM-001")), 1L)
+    session$setInputs(delete_state = "S-DIS")
+    expect_false(is.null(read_entity(con(), "sm_state", "S-DIS")))
+    session$setInputs(diagram_event = list(type = "add_component", x = 40, y = 40))
+    expect_identical(nrow(layout_rows(con(), "VW-sm-SM-001")), 1L)
+  })
+})
+
+test_that("Behavioral impact lists 4 scenarios for the battery and follows a focus", {
+  state <- local_sample_state()
+  con <- shiny::isolate(state$con())
+  battery <- Filter(function(card) card$entities[[1]]$id == "V-0013", compare_baselines(con, "BL-03"))[[1]]$change_set
+  shiny::testServer(mod_behavior_impact_server, args = list(state = state), {
+    session$setInputs(card = battery)
+    expect_length(session$getReturned()$items(), 4L)
+    session$setInputs(pick = "SC-003", set_side = "both")
+    expect_identical(session$getReturned()$scenario()$changed_nodes, c("N-4", "N-5"))
+  })
+})
+
+test_that("the Baselines link goes to Behavioral impact with that change", {
+  state <- local_sample_state()
+  shiny::testServer(mod_baselines_server, args = list(state = state), {
+    session$setInputs(to_behavior = "CS-9")
+    expect_identical(state$behavior_focus(), "CS-9")
+    expect_identical(state$nav()$tab, "Behavioral impact")
+  })
+})

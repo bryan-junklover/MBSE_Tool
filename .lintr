@@ -7,6 +7,14 @@ linters: linters_with_defaults(
     commented_code_linter = NULL
   )
 exclusions: list(
+    "modelbench/R/sm_sim.R" = list(line_length_linter = Inf),
+    "modelbench/R/behavior.R" = list(line_length_linter = Inf),
+    "modelbench/R/ai_behavior.R" = list(line_length_linter = Inf),
+    "modelbench/R/sm_expr.R" = list(line_length_linter = Inf),
+    "app/R/mod_behavior.R" = list(line_length_linter = Inf),
+    "app/R/seqview.R" = list(line_length_linter = Inf),
+    "modelbench/tests/testthat/test-behavior.R" = list(line_length_linter = Inf),
+    "app/tests/testthat/test-mod_behavior.R" = list(line_length_linter = Inf),
     "app/R/mod_ai_settings.R" = list(line_length_linter = Inf),
     "app/R/mod_review.R" = list(line_length_linter = Inf),
     "app/R/render.R" = list(line_length_linter = Inf),

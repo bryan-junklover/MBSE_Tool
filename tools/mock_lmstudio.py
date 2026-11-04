@@ -36,6 +36,11 @@ class Handler(BaseHTTPRequestHandler):
             answer = {"technical": "SYS-001 misses its limit: 31 / 35 min. Re-run TC-007, down 16 percent.", "stakeholder": "The smaller battery on C-003 means about 31 minutes in the air, not 35.", "decision": "Keep the current battery, or accept shorter missions."}
         elif "people who aren't engineers" in text:
             answer = {"paragraph": "A quadcopter that photographs an area from a planned route. A few items are still open.", "summaries": []}
+        elif "sketch a behaviour scenario" in text:
+            answer = {"steps": [{"kind": "message", "from": "E1", "to": "E2", "interface": "IF1", "label": "mock message after 5 s", "has_guard": "yes", "has_timing": "yes"}],
+                      "nodes": [], "edges": [], "missing": [{"title": "What cools the battery?", "body": "Mock answer."}]}
+        elif "questions about a state machine" in text:
+            answer = {"questions": [{"title": "What should happen if the link drops during landing?", "body": "Mock answer.", "confidence": "medium"}]}
         self.send_json({"id": "x", "object": "chat.completion", "model": "mock-model", "choices": [{"index": 0, "finish_reason": "stop",
                         "message": {"role": "assistant", "content": json.dumps(answer)}}], "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}})
 

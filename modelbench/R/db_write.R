@@ -339,6 +339,17 @@ save_layout <- function(con, view_id, items) {
   invisible(NULL)
 }
 
+# Behaviour views get a view_def the first time they're drawn, to hold their layout.
+ensure_view <- function(con, view_id, name, view_kind, owner_id) {
+  DBI::dbExecute(con, "INSERT OR IGNORE INTO view_def (id, name, view_kind, owner_id) VALUES (?, ?, ?, ?)", params = list(view_id, name, view_kind, owner_id))
+  invisible(view_id)
+}
+
+insert_sm_run <- function(con, assertion_id, result, trace_json, hash) {
+  DBI::dbExecute(con, "INSERT INTO sm_run (assertion_id, result, trace_json, model_hash) VALUES (?, ?, ?, ?)", params = list(assertion_id, result, trace_json, hash))
+  invisible(NULL)
+}
+
 delete_layout_item <- function(con, view_id, item_kind, item_id) {
   DBI::dbExecute(con, "DELETE FROM layout WHERE view_id = ? AND item_kind = ? AND item_id = ?",
                  params = list(view_id, item_kind, item_id))

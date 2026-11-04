@@ -181,7 +181,10 @@ mod_baselines_server <- function(id, state) {
       render_narrative(data$narrative, audience(), ns("set_audience"), sprintf("via %s", paste(c(data$provider_id, data$model), collapse = " · ")))
     })
     shiny::observeEvent(input$set_audience, audience(input$set_audience))
-    shiny::observeEvent(input$to_behavior, go_to(state, "Behavior"))
+    shiny::observeEvent(input$to_behavior, {
+      state$behavior_focus(input$to_behavior)
+      go_to(state, "Behavior", "Behavioral impact")
+    })
 
     # --- Create a baseline ---
     output$create_button <- shiny::renderUI({

@@ -165,3 +165,27 @@ select.mb-table-input { min-width: 92px; }
 .mb-parts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 12px; }
 .mb-page-grid { display: flex; flex-wrap: wrap; gap: 24px; padding: 24px; align-items: flex-start; }
 .mb-narrative p { margin: 0 0 10px; max-width: 80ch; line-height: 1.55; }
+
+/* Behavior */
+.mb-seqview { overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.mb-seqview [role=button] { cursor: pointer; }
+.mb-seqview [role=button]:focus { outline: 2px solid var(--ink); }
+.mb-seq-table td { padding: 3px 4px; vertical-align: middle; }
+.mb-seq-table input, .mb-seq-table select { font: inherit; font-size: 12px; width: 100%; min-width: 64px; border: 1px solid var(--line-control); border-radius: var(--radius); padding: 2px 4px; background: var(--surface); }
+.mb-seq-table tr[draggable] td:first-child { cursor: grab; color: var(--ink-3); }
+.mb-seq-table input.mb-field-missing { color: var(--gap-text); border-color: var(--gap-stroke); }
+.mb-seq-table tr.mb-unreviewed { background: var(--ai-tint); }
+.mb-runbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 8px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); font-family: var(--font-mono); font-size: 13px; }
+.mb-runbar input[type=text] { width: 64px; font: inherit; }
+.mb-fire { display: flex; flex-wrap: wrap; gap: 6px; }
+.mb-fire button { font-family: var(--font-mono); font-size: 12px; padding: 4px 10px; border-radius: var(--radius); cursor: pointer; }
+.mb-fire .valid { background: var(--ink); color: #FFFFFF; border: 1px solid var(--ink); }
+.mb-fire .muted { background: var(--surface); color: var(--ink-2); border: 1px solid var(--line-control); }
+.mb-trace { max-height: 200px; overflow: auto; font-family: var(--font-mono); font-size: 12px; margin: 0; padding: 0; list-style: none; }
+.mb-trace li { padding: 2px 0; }
+.mb-trace .gap { color: var(--gap-text); font-weight: 600; }
+.mb-trace .error { color: var(--gap-text); font-weight: 600; }
+.mb-check-pass { font-weight: 600; }
+.mb-check-fail { color: var(--gap-text); font-weight: 600; }
+.mb-compare { display: flex; flex-wrap: wrap; gap: 16px; }
+.mb-compare > * { flex: 1 1 420px; min-width: 0; }

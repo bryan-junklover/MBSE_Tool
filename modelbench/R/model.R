@@ -198,8 +198,8 @@ structure_view <- function(con, view_id = "VW-all", root = default_structure_roo
 }
 
 # Moved blocks, as layout rows.
-layout_items <- function(positions, pinned = NULL) {
-  data.frame(item_kind = "element", item_id = positions$id, x = positions$x, y = positions$y, w = NA_real_, h = NA_real_,
+layout_items <- function(positions, pinned = NULL, item_kind = "element") {
+  data.frame(item_kind = item_kind, item_id = positions$id, x = positions$x, y = positions$y, w = NA_real_, h = NA_real_,
              extra_json = if (is.null(pinned)) NA_character_ else ifelse(pinned, '{"pinned":true}', '{"pinned":false}'),
              stringsAsFactors = FALSE)
 }

@@ -30,7 +30,18 @@ HTMLWidgets.widget({
     }, {
       markup: [{ tagName: "rect", selector: "body" }, { tagName: "text", selector: "stereotype" }, { tagName: "text", selector: "name" }, { tagName: "text", selector: "note" }]
     });
-    var namespace = { mb: { Block: Block }, standard: shapes.standard };
+    // Decisions in an activity: same attribute names as a block, drawn as a diamond.
+    var Diamond = Block.define("mb.Diamond", {
+      attrs: { body: { refPoints: "0,10 10,0 20,10 10,20", fill: "#E3E4E6", stroke: "none", width: null, height: null, rx: null, ry: null } }
+    }, {
+      markup: [{ tagName: "polygon", selector: "body" }, { tagName: "text", selector: "stereotype" }, { tagName: "text", selector: "name" }, { tagName: "text", selector: "note" }]
+    });
+    var SHAPES = {
+      state: { width: 160, height: 60, rx: 20 }, action: { width: 190, height: 60, rx: 16 }, decision: { width: 210, height: 100 },
+      merge: { width: 44, height: 44 }, initial: { width: 26, height: 26, rx: 13, solid: true }, final: { width: 26, height: 26, rx: 13, solid: true },
+      fork: { width: 130, height: 10, rx: 2, solid: true }, join: { width: 130, height: 10, rx: 2, solid: true }
+    };
+    var namespace = { mb: { Block: Block, Diamond: Diamond }, standard: shapes.standard };
 
     var graph = new dia.Graph({}, { cellNamespace: namespace });
     var holder = document.createElement("div");
@@ -46,7 +57,7 @@ HTMLWidgets.widget({
       background: { color: CANVAS }, async: false, sorting: dia.Paper.sorting.NONE, cellViewNamespace: namespace,
       linkPinning: false, snapLinks: { radius: 16 }, markAvailable: false,
       defaultLink: function () { return newLink(); },
-      validateConnection: function (a, ma, b, mb) { return !!mb && a !== b; },
+      validateConnection: function (a, ma, b, mb) { return !!mb && (a !== b || behaviourMode()); },
       validateMagnet: function () { return tool !== "select_only"; },
       interactive: function (view) { return view.model.isLink() ? { linkMove: false, labelMove: false, arrowheadMove: false, vertexMove: false, vertexAdd: false, useLinkTools: false } : { elementMove: tool === "select" }; }
     });
@@ -77,7 +88,82 @@ HTMLWidgets.widget({
       ports.forEach(function (p) { sides[portSide(p)]++; });
       return { width: Math.max(BLOCK_W, 28 * Math.max(sides.top, sides.bottom) + 40), height: Math.max(BLOCK_H, 24 * Math.max(sides.left, sides.right) + 24) };
     }
+    // Behaviour nodes connect by four handles, one on each side.
+    function handles(node) {
+      if (["initial", "final", "fork", "join"].indexOf(node.shape) >= 0 && data.mode === "activity") return [];
+      return ["top", "right", "bottom", "left"].map(function (side) { return { id: node.id + ":" + side, group: side, attrs: { portBody: { width: 8, height: 8, x: -4, y: -4, fill: CANVAS, stroke: LINE, strokeWidth: 1 } } }; });
+    }
+    function shapeAttrs(node) {
+      var look = SHAPES[node.shape] || SHAPES.action;
+      var a = { stereotype: { text: node.initial ? "start" : (node.final ? "final" : ""), y: 13, fontSize: 10 }, name: { text: node.name, y: "calc(0.5*h)", textVerticalAnchor: "middle", fontWeight: 500, textWrap: { width: node.shape === "decision" ? -70 : -16, maxLineCount: 3, ellipsis: true } }, note: { text: node.gap_note || "", textWrap: null, fontFamily: MONO, fontWeight: 600 } };
+      if (node.shape !== "decision" && node.shape !== "merge") a.body = { rx: look.rx || 4, ry: look.rx || 4, stroke: LINE, strokeWidth: 1, fill: "#FFFFFF" };
+      if (look.solid) a.body = { rx: look.rx, ry: look.rx, fill: INK, stroke: INK };
+      if (node.shape === "decision" || node.shape === "merge") a.body = { fill: "#E3E4E6" };
+      if (node.initial) a.body.strokeWidth = 2;
+      if (node.review_state === "unreviewed") {
+        a.body = Object.assign(a.body, { stroke: AI, strokeWidth: 2, strokeDasharray: "6 6", fill: AI_TINT });
+        a.name.fill = AI_TEXT;
+      } else if (node.gap) {
+        a.body = Object.assign(a.body, { stroke: GAP, strokeWidth: 2, strokeDasharray: "6 4", fill: GAP_TINT });
+      }
+      if (data.current != null && data.current === node.id) {
+        a.body = Object.assign(a.body, { fill: INK, stroke: INK, strokeDasharray: null });
+        a.name.fill = "#FFFFFF";
+        a.stereotype.fill = "#FFFFFF";
+      } else {
+        if (!a.name.fill) a.name.fill = INK;
+        a.stereotype.fill = "#5B5E63";
+      }
+      return a;
+    }
+    // Transitions between the same two states would draw on top of each other, so each
+    // bows out by its own amount. Self-transitions loop off the right-hand side.
+    function spreadParallel() {
+      if (!behaviourMode()) return;
+      var groups = {}, labelSpots = [];
+      graph.getLinks().forEach(function (link) {
+        var a = String(link.source().id), b = String(link.target().id);
+        var key = a < b ? a + "|" + b : b + "|" + a;
+        (groups[key] = groups[key] || []).push(link);
+      });
+      Object.keys(groups).forEach(function (key) {
+        var links = groups[key];
+        links.forEach(function (link, i) {
+          var s = graph.getCell(link.source().id), t = graph.getCell(link.target().id);
+          if (!s || !t) return;
+          if (s === t) {
+            var box = s.getBBox(), reach = 46 + i * 26;
+            link.vertices([{ x: box.x + box.width + reach, y: box.y + 8 }, { x: box.x + box.width + reach, y: box.y + box.height - 8 }]);
+            return;
+          }
+          var from = s.getBBox().center(), to = t.getBBox().center();
+          // Measured from one fixed direction, so opposite transitions don't cancel out.
+          var flip = String(link.source().id) < String(link.target().id) ? 1 : -1;
+          var dx = (to.x - from.x) * flip, dy = (to.y - from.y) * flip, len = Math.sqrt(dx * dx + dy * dy) || 1;
+          var base = (i - (links.length - 1) / 2) * 90;
+          var others = graph.getElements().filter(function (e) { return e !== s && e !== t; }).map(function (e) { return e.getBBox().inflate(14); });
+          var label = link.labels()[0], half = label ? String(label.attrs.text.text).length * 3.7 : 0;
+          var tries = [0, 100, -100, 200, -200, 300, -300, 400, -400];
+          for (var k = 0; k < tries.length; k++) {
+            var bow = base + tries[k];
+            var mid = { x: Math.round((from.x + to.x) / 2 - dy / len * bow), y: Math.round((from.y + to.y) / 2 + dx / len * bow) };
+            var hits = others.some(function (box) {
+              return box.intersectionWithLine(new joint.g.Line(from, mid)) || box.intersectionWithLine(new joint.g.Line(mid, to)) || (Math.abs(mid.x - box.center().x) < box.width / 2 + half && Math.abs(mid.y - box.center().y) < box.height / 2 + 10);
+            });
+            if (mid.x < half + 12 || mid.y < 16) hits = true;
+            var crowded = labelSpots.some(function (p) { return Math.abs(p.x - mid.x) < p.half + half + 8 && Math.abs(p.y - mid.y) < 22; });
+            if ((!hits && !crowded) || k === tries.length - 1) {
+              labelSpots.push({ x: mid.x, y: mid.y, half: half });
+              link.vertices(bow === 0 ? [] : [mid]);
+              break;
+            }
+          }
+        });
+      });
+    }
+    function behaviourMode() { return data && (data.mode === "state_machine" || data.mode === "activity"); }
     function blockAttrs(node) {
+      if (behaviourMode()) return shapeAttrs(node);
       var kicker = data && data.mode === "functional" ? node.id : (node.stereotype ? "«" + node.stereotype + "»" : "") + (node.multiplicity > 1 ? " ×" + node.multiplicity : "");
       var a = { name: { text: node.name }, stereotype: { text: kicker }, note: { text: node.gap_note ? "Gap: " + node.gap_note : "" } };
       if (node.allocation) a.note = { text: node.allocation, fill: node.unallocated ? GAP_TEXT : "#5B5E63" };
@@ -93,6 +179,11 @@ HTMLWidgets.widget({
     function build(x) {
       data = x;
       var blocks = x.nodes.map(function (node) {
+        if (behaviourMode()) {
+          var look = SHAPES[node.shape] || SHAPES.action;
+          var Kind = node.shape === "decision" || node.shape === "merge" ? Diamond : Block;
+          return new Kind({ id: node.id, z: 2, position: { x: node.x == null ? 0 : node.x, y: node.y == null ? 0 : node.y }, size: { width: look.width, height: look.height }, attrs: blockAttrs(node), ports: { items: handles(node) } });
+        }
         var ports = x.ports.filter(function (p) { return p.element_id === node.id; });
         var size = blockSize(ports);
         return new Block({ id: node.id, z: 2, position: { x: node.x == null ? 0 : node.x, y: node.y == null ? 0 : node.y }, size: size, attrs: blockAttrs(node), ports: { items: ports.map(portItem) } });
@@ -126,6 +217,7 @@ HTMLWidgets.widget({
         link.target(t || { x: 0, y: 0 });
         if (edge.review_state === "unreviewed") link.attr("line", { stroke: AI, strokeDasharray: "6 6" });
         if (edge.stub) link.attr("line/strokeDasharray", "4 4");
+        if (edge.gap) link.attr("line", { stroke: GAP, strokeDasharray: "6 4", targetMarker: { type: "path", d: "M 8 -4 L 0 0 L 8 4 z", fill: GAP, stroke: GAP } });
         if (x.mode === "flows") {
           var style = FLOW_STYLES[edge.flow_type];
           if (style) {
@@ -145,6 +237,7 @@ HTMLWidgets.widget({
       graph.resetCells(links.concat(blocks).concat(boundary));
       placeStubs(links);
       drawBand();
+      spreadParallel();
       fit();
       applySelection();
       holder.scrollLeft = scrollX;
@@ -265,6 +358,7 @@ HTMLWidgets.widget({
       var before = model.get("mbLast"), p = model.position();
       model.set("mbLast", { x: p.x, y: p.y }, { silent: true });
       if (before && before.x === p.x && before.y === p.y) return;
+      spreadParallel();
       fit();
       send("move", { id: id, x: p.x, y: p.y });
     });
@@ -274,7 +368,7 @@ HTMLWidgets.widget({
     });
     paper.on("link:connect", function (view) {
       var s = view.model.source(), t = view.model.target();
-      send("connect", { source: s.port, target: t.port });
+      send("connect", { source: s.port, target: t.port, source_id: String(s.id), target_id: t.id == null ? null : String(t.id) });
     });
 
     function connectedBlocks(id) {
@@ -310,7 +404,7 @@ HTMLWidgets.widget({
       blocks.forEach(function (b) { known[b.id] = true; });
       var graphDef = {
         id: "root",
-        layoutOptions: { "elk.algorithm": "layered", "elk.direction": "DOWN", "elk.spacing.nodeNode": "48", "elk.layered.spacing.nodeNodeBetweenLayers": "80", "elk.padding": "[top=48,left=120,bottom=48,right=120]", "elk.portConstraints": "FIXED_SIDE" },
+        layoutOptions: { "elk.algorithm": "layered", "elk.direction": "DOWN", "elk.spacing.nodeNode": behaviourMode() ? "150" : "48", "elk.layered.spacing.nodeNodeBetweenLayers": behaviourMode() ? "120" : "80", "elk.padding": "[top=48,left=120,bottom=48,right=120]", "elk.portConstraints": "FIXED_SIDE" },
         children: blocks.map(function (b) {
           var size = b.size();
           return { id: String(b.id), width: size.width, height: size.height, layoutOptions: { "elk.portConstraints": "FIXED_SIDE" },
@@ -350,6 +444,7 @@ HTMLWidgets.widget({
         graph.stopBatch("layout");
         placeStubs(graph.getLinks());
         drawBand();
+        spreadParallel();
         fit();
         showBlocks();
         send("layout", { positions: positions, user: !!userAsked });
@@ -361,6 +456,15 @@ HTMLWidgets.widget({
         if (msg.type === "set_tool") { tool = msg.payload.tool; holder.style.cursor = tool === "select" ? "" : "crosshair"; }
         if (msg.type === "set_selection") { selected = msg.payload.ids || []; applySelection(); }
         if (msg.type === "auto_layout") autoLayout(true);
+        if (msg.type === "set_current" && data) {
+          var was = data.current;
+          data.current = msg.payload.id == null ? null : msg.payload.id;
+          data.nodes.forEach(function (n) {
+            if (n.id !== was && n.id !== data.current) return;
+            var cell = graph.getCell(n.id);
+            if (cell) cell.attr(blockAttrs(n));
+          });
+        }
       });
     }
     window.mbdiagramDebug = window.mbdiagramDebug || {};

@@ -64,7 +64,16 @@ app_ui <- function() {
             bslib::nav_panel_hidden("Stakeholder", mod_stakeholder_ui("stakeholder"))
           )
         ),
-        bslib::nav_panel_hidden("Behavior", phase_placeholder("The behavior workspace", 6L)),
+        bslib::nav_panel_hidden(
+          "Behavior",
+          shiny::tags$div(class = "mb-tabbar", shiny::uiOutput("behavior_tabs")),
+          bslib::navset_hidden(
+            id = "behavior_tab", selected = "Scenarios",
+            bslib::nav_panel_hidden("Scenarios", mod_scenarios_ui("scenarios")),
+            bslib::nav_panel_hidden("State machines", mod_machines_ui("machines")),
+            bslib::nav_panel_hidden("Behavioral impact", mod_behavior_impact_ui("behavior_impact"))
+          )
+        ),
         bslib::nav_panel_hidden(
           "Analyze",
           shiny::tags$div(class = "mb-tabbar", shiny::uiOutput("analyze_tabs")),
@@ -83,9 +92,10 @@ app_ui <- function() {
 WORKSPACE_TABS <- list(
   Write = c("Draft", "Specification", "Traceability"),
   Model = c("Structure", "Flows", "Functional", "Interfaces", "Stakeholder"),
+  Behavior = c("Scenarios", "State machines", "Behavioral impact"),
   Analyze = c("Health", "Review queue", "Baselines & impact")
 )
-TAB_SETS <- c(Write = "write_tab", Model = "model_tab", Analyze = "analyze_tab")
+TAB_SETS <- c(Write = "write_tab", Model = "model_tab", Behavior = "behavior_tab", Analyze = "analyze_tab")
 
 render_tab_bar <- function(workspace, active) {
   tabs <- setdiff(WORKSPACE_TABS[[workspace]], "Stakeholder")
@@ -130,9 +140,10 @@ app_server <- function(input, output, session) {
   })
   output$top_nav <- shiny::renderUI(render_top_nav(state$nav()$workspace, "nav_click"))
   # The tab last used in each workspace, kept when moving between them.
-  tabs <- shiny::reactiveVal(list(Write = "Draft", Model = "Structure", Analyze = "Health"))
+  tabs <- shiny::reactiveVal(list(Write = "Draft", Model = "Structure", Behavior = "Scenarios", Analyze = "Health"))
   output$write_tabs <- shiny::renderUI(render_tab_bar("Write", tabs()$Write))
   output$model_tabs <- shiny::renderUI(render_tab_bar("Model", tabs()$Model))
+  output$behavior_tabs <- shiny::renderUI(render_tab_bar("Behavior", tabs()$Behavior))
   output$analyze_tabs <- shiny::renderUI(render_tab_bar("Analyze", tabs()$Analyze))
 
   apply_nav <- function(target) {
@@ -180,5 +191,8 @@ app_server <- function(input, output, session) {
   mod_review_server("review", state)
   mod_baselines_server("baselines", state)
   mod_stakeholder_server("stakeholder", state)
+  mod_scenarios_server("scenarios", state)
+  mod_machines_server("machines", state)
+  mod_behavior_impact_server("behavior_impact", state)
   mod_ai_settings_server("ai_settings", state)
 }

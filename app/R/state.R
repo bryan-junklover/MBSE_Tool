@@ -12,6 +12,7 @@ new_app_state <- function(con) {
     selected_interface = shiny::reactiveVal(NULL),
     commands = shiny::reactiveVal(new_command_stack()),
     open_in_write = shiny::reactiveVal(NULL),
+    behavior_focus = shiny::reactiveVal(NULL),
     nav = shiny::reactiveVal(list(workspace = "Write", tab = "Draft"))
   )
 }
@@ -57,6 +58,15 @@ model_edit <- function(state, code, label = "edit") {
   change_set <- if (is.list(written)) written$change_set else written
   state$commands(push_command(shiny::isolate(state$commands()), change_command(change_set, label)))
   invalidate_db(state, c("model", "spec"))
+  written
+}
+
+# The same, for behaviour: state machines and scenarios also feed the model's counts.
+behavior_edit <- function(state, code, label = "edit") {
+  written <- guarded_edit(code)
+  if (is.null(written)) return(NULL)
+  state$commands(push_command(shiny::isolate(state$commands()), change_command(written$change_set, label)))
+  invalidate_db(state, c("behavior", "model"))
   written
 }
 
