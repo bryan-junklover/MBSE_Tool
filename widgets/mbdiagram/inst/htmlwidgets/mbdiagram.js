@@ -91,6 +91,8 @@ HTMLWidgets.widget({
     // Behaviour nodes connect by four handles, one on each side.
     function handles(node) {
       if (["initial", "final", "fork", "join"].indexOf(node.shape) >= 0 && data.mode === "activity") return [];
+      // A read-only view has nothing to connect, so it shows no handles.
+      if (tool === "select_only") return [];
       return ["top", "right", "bottom", "left"].map(function (side) { return { id: node.id + ":" + side, group: side, attrs: { portBody: { width: 8, height: 8, x: -4, y: -4, fill: CANVAS, stroke: LINE, strokeWidth: 1 } } }; });
     }
     function shapeAttrs(node) {
@@ -240,9 +242,15 @@ HTMLWidgets.widget({
       spreadParallel();
       fit();
       applySelection();
-      holder.scrollLeft = scrollX;
-      holder.scrollTop = scrollY;
-      if (!sameLevel) showBlocks();
+      if (tool === "select_only") {
+        holder.scrollLeft = 0;
+        holder.scrollTop = 0;
+      } else {
+        holder.scrollLeft = scrollX;
+        holder.scrollTop = scrollY;
+        if (!sameLevel) showBlocks();
+      }
+      if (data.current != null) reveal(data.current);
       var unplaced = x.nodes.filter(function (node) { return node.x == null; });
       if (unplaced.length > 0) autoLayout(false);
     }
@@ -264,15 +272,31 @@ HTMLWidgets.widget({
       graph.addCell(band);
     }
     // A wide layout can start well off to the side, so open where the blocks are.
+    // Scrolling to the topmost block clipped any block further left, so this uses the
+    // top-left corner of all of them.
     function showBlocks() {
-      var first = null;
+      var left = Infinity, top = Infinity;
       graph.getElements().forEach(function (b) {
         if (String(b.id).indexOf("B:") === 0) return;
-        if (!first || b.position().y < first.position().y) first = b;
+        left = Math.min(left, b.position().x);
+        top = Math.min(top, b.position().y);
       });
-      if (!first) return;
-      holder.scrollLeft = Math.max(0, first.position().x - 80);
-      holder.scrollTop = Math.max(0, first.position().y - 40);
+      if (left === Infinity) return;
+      var s = paper.scale().sx;
+      holder.scrollLeft = Math.max(0, left * s - 40);
+      holder.scrollTop = Math.max(0, top * s - 40);
+    }
+    // Scrolls a cell into the middle of the view when any part of it is out of sight.
+    function reveal(id) {
+      var cell = id == null ? null : graph.getCell(id);
+      if (!cell) return;
+      var s = paper.scale().sx, box = cell.getBBox();
+      var x0 = box.x * s, y0 = box.y * s, x1 = (box.x + box.width) * s, y1 = (box.y + box.height) * s;
+      var inside = x0 >= holder.scrollLeft && x1 <= holder.scrollLeft + holder.clientWidth &&
+                   y0 >= holder.scrollTop && y1 <= holder.scrollTop + holder.clientHeight;
+      if (inside) return;
+      holder.scrollLeft = Math.max(0, (x0 + x1) / 2 - holder.clientWidth / 2);
+      holder.scrollTop = Math.max(0, (y0 + y1) / 2 - holder.clientHeight / 2);
     }
     function paperWidth(x) { return Math.max(el.clientWidth || 600, 500); }
     // A stub runs a short way off its block, towards the view's edge.
@@ -290,9 +314,23 @@ HTMLWidgets.widget({
     }
     function fit() {
       var box = graph.getBBox();
+      if (tool === "select_only") { fitToView(box); return; }
       var w = Math.max(el.clientWidth || 800, box ? box.x + box.width + 80 : 0);
       var h = Math.max(el.clientHeight || 500, box ? box.y + box.height + 110 : 0);
       paper.setDimensions(w, h);
+    }
+    // Read-only views (Behavioral impact) exist to show the whole diagram, so they shrink it
+    // to the box, down to a readable floor, and scroll only past that.
+    function fitToView(box) {
+      var availW = el.clientWidth, availH = el.clientHeight;
+      if (!box || !availW || !availH) return;
+      var pad = 24, contentW = box.x + box.width + pad, contentH = box.y + box.height + pad;
+      var originX = Math.max(0, box.x - pad), originY = Math.max(0, box.y - pad);
+      var s = Math.min(1, availW / (contentW - originX), availH / (contentH - originY));
+      s = Math.max(0.35, s);
+      paper.scale(s, s);
+      paper.translate(-originX * s, -originY * s);
+      paper.setDimensions(Math.max(availW, (contentW - originX) * s), Math.max(availH, (contentH - originY) * s));
     }
 
     // Touches only the cells whose state changed: a full pass redraws every link.
@@ -464,8 +502,19 @@ HTMLWidgets.widget({
             var cell = graph.getCell(n.id);
             if (cell) cell.attr(blockAttrs(n));
           });
+          reveal(data.current);
         }
       });
+    }
+    // Panes that start hidden or change width (side by side) don't always get a resize call.
+    if (window.ResizeObserver) {
+      var lastSize = "";
+      new ResizeObserver(function () {
+        var size = el.clientWidth + "x" + el.clientHeight;
+        if (size === lastSize || !data) return;
+        lastSize = size;
+        fit();
+      }).observe(el);
     }
     window.mbdiagramDebug = window.mbdiagramDebug || {};
     window.mbdiagramDebug[el.id] = { graph: graph, paper: paper };

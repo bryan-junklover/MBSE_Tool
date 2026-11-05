@@ -109,6 +109,12 @@ render_connections <- function(view, element_names) {
 labelled <- function(label, control) shiny::tags$label(style = "display:flex;flex-direction:column;gap:2px", shiny::tags$span(class = "mb-caption", label), control)
 
 select_tag <- function(choices, selected, onchange, blank = NULL, label = NULL) {
+  # Unnamed choices label themselves, or the options render blank.
+  labels <- names(choices)
+  if (is.null(labels)) labels <- rep("", length(choices))
+  unlabelled <- is.na(labels) | labels == ""
+  labels[unlabelled] <- choices[unlabelled]
+  names(choices) <- labels
   options <- c(if (!is.null(blank)) stats::setNames("", blank), choices)
   shiny::tags$select(onchange = onchange, `aria-label` = label, lapply(seq_along(options), function(i) {
     shiny::tags$option(value = unname(options[i]), selected = if (identical(unname(options[i]), selected)) NA, names(options)[i])

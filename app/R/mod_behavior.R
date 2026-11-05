@@ -1,5 +1,9 @@
 # Behavior › Scenarios, State machines and Behavioral impact (handoff §5.7, §5.8).
 
+STEP_KINDS <- c("Message" = "message", "Self call" = "self", "Note" = "note",
+                "Fragment start" = "fragment_open", "Else" = "fragment_else", "Fragment end" = "fragment_close")
+FRAGMENT_KINDS <- c("alt" = "alt", "opt" = "opt", "loop" = "loop", "par" = "par")
+
 blank_of <- function(x) if (is.null(x) || length(x) == 0L || is.na(x)) "" else as.character(x)
 
 review_block <- function(ns, input_name, note_id) {
@@ -39,9 +43,9 @@ render_step_table <- function(steps, lifelines, interfaces, selected, ns) {
         `data-row-id` = step$id, draggable = "true", class = paste(if (step$review_state == "unreviewed") "mb-unreviewed", if (identical(step$id, selected)) "mb-row-selected"),
         onclick = sprintf("if (event.target.tagName === 'TD') { %s }", event_js(ns("select_step"), step$id)),
         shiny::tags$td(title = "Drag to reorder", "⋮⋮"),
-        shiny::tags$td(select_tag(c("message", "self", "note", "fragment_open", "fragment_else", "fragment_close"), step$step_kind, field("step_kind"), label = "Kind")),
+        shiny::tags$td(select_tag(STEP_KINDS, step$step_kind, field("step_kind"), label = "Kind")),
         shiny::tags$td(if (has_ends) select_tag(lifeline_choices, blank_of(step$from_lifeline_id), field("from_lifeline_id"), "—", label = "From")
-                       else if (step$step_kind == "fragment_open") select_tag(c("alt", "opt", "loop", "par"), blank_of(step$fragment_kind), field("fragment_kind"), label = "Fragment kind")),
+                       else if (step$step_kind == "fragment_open") select_tag(FRAGMENT_KINDS, blank_of(step$fragment_kind), field("fragment_kind"), label = "Fragment kind")),
         shiny::tags$td(if (is_message) select_tag(lifeline_choices, blank_of(step$to_lifeline_id), field("to_lifeline_id"), "—", label = "To")),
         shiny::tags$td(if (is_message) select_tag(interface_choices, blank_of(step$interface_id), field("interface_id"), "None", label = "Interface")),
         shiny::tags$td(if (is_message) shiny::tags$input(type = "text", value = blank_of(step$field_name), class = if (step$field_missing) "mb-field-missing", `aria-label` = "Field", onchange = field("field_name"))),
@@ -750,7 +754,7 @@ mod_machines_server <- function(id, state) {
         if (row$review_state == "unreviewed") review_block(ns, "review_state_row", "state_note"),
         shiny::tags$label("Name", shiny::tags$input(type = "text", value = row$name, onchange = field("name"))),
         shiny::tags$label("Entry effect", shiny::tags$input(type = "text", class = "mono", value = blank_of(row$entry_effect), onchange = field("entry_effect"))),
-        shiny::tags$label("Kind", select_tag(c("normal", "final"), row$kind, field("kind"))),
+        shiny::tags$label("Kind", select_tag(c("Normal" = "normal", "Final" = "final"), row$kind, field("kind"))),
         shiny::tags$div(class = "mb-label", "Must handle"),
         lapply(seq_len(nrow(m$events)), function(i) {
           event <- m$events[i, ]

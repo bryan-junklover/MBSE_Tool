@@ -29,6 +29,16 @@ body { background: var(--ground); color: var(--ink); font-family: var(--font-san
 .mb-btn:disabled, .mb-btn.disabled { opacity: 0.55; cursor: not-allowed; }
 .mb-btn-primary { background: var(--ink); border-color: var(--ink); color: #FFFFFF; font-size: 14px; padding: 8px 16px; min-height: 44px; }
 .mb-btn-primary:hover { background: var(--ink-2); color: #FFFFFF; }
+/* actionButton() keeps Bootstrap's .btn classes, whose focus and active states set near-white
+   text on a light ground and hid the label after a click. Pin every state to the tokens. */
+.mb-btn { --bs-btn-color: var(--ink); --bs-btn-bg: var(--surface); --bs-btn-border-color: var(--line-control);
+  --bs-btn-hover-color: var(--ink); --bs-btn-hover-bg: var(--surface-muted); --bs-btn-hover-border-color: var(--line-control);
+  --bs-btn-active-color: var(--ink); --bs-btn-active-bg: var(--surface-muted); --bs-btn-active-border-color: var(--line-control);
+  --bs-btn-disabled-color: var(--ink); --bs-btn-disabled-bg: var(--surface); --bs-btn-disabled-border-color: var(--line-control); }
+.btn.mb-btn:focus, .btn.mb-btn:active, .btn.mb-btn.active, .btn.mb-btn:first-child:active, :not(.btn-check) + .btn.mb-btn:active { color: var(--ink); background: var(--surface-muted); border-color: var(--line-control); }
+.btn.mb-btn:not(:hover):not(:active):focus { background: var(--surface); }
+.btn.mb-btn-primary:focus, .btn.mb-btn-primary:active, .btn.mb-btn-primary.active, .btn.mb-btn-primary:first-child:active { color: #FFFFFF; background: var(--ink); border-color: var(--ink); }
+.btn.mb-btn-ai:focus, .btn.mb-btn-ai:active, .btn.mb-btn-ai.active, .btn.mb-btn-ai:first-child:active { color: #FFFFFF; background: var(--ai); border-color: var(--ai); }
 .mb-btn-small { font-size: 12px; padding: 4px 10px; }
 .mb-segmented { display: inline-flex; border: 1px solid var(--line-control); border-radius: var(--radius); overflow: hidden; }
 .mb-segmented button { font: inherit; font-size: 13px; padding: 6px 12px; border: 0; background: var(--surface); color: var(--ink); cursor: pointer; }

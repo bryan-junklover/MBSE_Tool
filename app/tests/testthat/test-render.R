@@ -83,3 +83,14 @@ test_that("nothing outside the tests loads the test helpers, which switch off re
     expect_true(all(grepl("helpers = FALSE", loads)), info = script)
   }
 })
+
+test_that("select options always carry a label, even from unnamed choices", {
+  html <- html_of(select_tag(c("alt", "opt"), "opt", "", blank = "None"))
+  expect_match(html, ">None</option>", fixed = TRUE)
+  expect_match(html, ">alt</option>", fixed = TRUE)
+  expect_match(html, "selected>opt</option>", fixed = TRUE)
+  named <- html_of(select_tag(c("Message" = "message", "self"), "message", ""))
+  expect_match(named, ">Message</option>", fixed = TRUE)
+  expect_match(named, ">self</option>", fixed = TRUE)
+  expect_false(grepl("></option>", html_of(select_tag(STEP_KINDS, "note", "")), fixed = TRUE))
+})
