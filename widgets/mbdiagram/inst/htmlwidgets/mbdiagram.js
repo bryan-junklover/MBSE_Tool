@@ -239,8 +239,18 @@ HTMLWidgets.widget({
         return cell.getPort(end.port).group;
       };
       var s = side(link.source()), t = side(link.target());
+      // Links leaving the same side of one block each take their own channel (UX re-review P2.7).
+      var lane = function (end, group) {
+        if (!group) return 0;
+        var mates = graph.getLinks().filter(function (other) {
+          var o = other.source(), q = other.target();
+          return (o.id === end.id && side(o) === group) || (q.id === end.id && side(q) === group);
+        }).map(function (other) { return String(other.id); }).sort();
+        return Math.max(0, mates.indexOf(String(link.id)));
+      };
+      var n = Math.min(4, Math.max(lane(link.source(), s), lane(link.target(), t)));
       link.router("manhattan", {
-        step: 8, padding: 16, maximumLoops: 800, excludeTypes: ["mb.Band"],
+        step: 8, padding: 16 + 8 * n, maximumLoops: 800, excludeTypes: ["mb.Band"],
         startDirections: s ? [s] : ["top", "right", "bottom", "left"],
         endDirections: t ? [t] : ["top", "right", "bottom", "left"]
       });
@@ -451,18 +461,37 @@ HTMLWidgets.widget({
       holder.scrollLeft = Math.max(0, (box.x + box.width / 2 - origin.x) * scale - holder.clientWidth / 2);
       holder.scrollTop = Math.max(0, (box.y + box.height / 2 - origin.y) * scale - holder.clientHeight / 2);
     }
-    // Scrolls a cell into the middle of the view when any part of it is out of sight.
+    // The part of the view not covered by an overlay column, in view pixels.
+    function openSpan() {
+      var lo = 0, hi = holder.clientWidth, r = holder.getBoundingClientRect();
+      var body = el.closest(".mb-body");
+      if (body) body.querySelectorAll(".mb-col-overlay").forEach(function (col) {
+        var q = col.getBoundingClientRect();
+        if (q.right <= r.left || q.left >= r.right) return;
+        if (q.left - r.left > r.right - q.right) hi = Math.min(hi, q.left - r.left); else lo = Math.max(lo, q.right - r.left);
+      });
+      return hi - lo < 120 ? { lo: 0, hi: holder.clientWidth } : { lo: lo, hi: hi };
+    }
+    // Scrolls a cell into the middle of the open view when any part of it is out of sight.
     function reveal(id) {
       var cell = id == null ? null : graph.getCell(id);
       if (!cell) return;
-      var box = cell.getBBox();
+      var box = cell.getBBox(), span = openSpan();
       var x0 = (box.x - origin.x) * scale, y0 = (box.y - origin.y) * scale, x1 = x0 + box.width * scale, y1 = y0 + box.height * scale;
-      var inside = x0 >= holder.scrollLeft && x1 <= holder.scrollLeft + holder.clientWidth &&
+      var inside = x0 >= holder.scrollLeft + span.lo && x1 <= holder.scrollLeft + span.hi &&
                    y0 >= holder.scrollTop && y1 <= holder.scrollTop + holder.clientHeight;
       if (inside) return;
-      holder.scrollLeft = Math.max(0, (x0 + x1) / 2 - holder.clientWidth / 2);
+      var left = Math.max(0, (x0 + x1) / 2 - (span.lo + span.hi) / 2);
+      // A fitted paper has no room to scroll, so widen it past an overlay on the right.
+      var room = left + holder.clientWidth;
+      if (room > paper.options.width) paper.setDimensions(Math.ceil(room), paper.options.height);
+      holder.scrollLeft = left;
       holder.scrollTop = Math.max(0, (y0 + y1) / 2 - holder.clientHeight / 2);
     }
+    // An inspector opening over the canvas keeps the selection in sight (UX re-review P2.1).
+    document.addEventListener("mb:overlay", function () {
+      if (el.isConnected && selected.length === 1) reveal(selected[0]);
+    });
     function paperWidth(x) { return Math.max(el.clientWidth || 600, 500); }
     // A stub runs a short way off its block, towards the view's edge.
     function placeStubs(links) {

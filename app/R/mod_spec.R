@@ -46,7 +46,7 @@ spec_columns <- function() {
   }
   list(
     id = reactable::colDef(name = "ID", width = 85, class = "mono"),
-    text = reactable::colDef(name = "Requirement", minWidth = 220),
+    text = reactable::colDef(name = "Requirement", minWidth = 180),
     req_type = reactable::colDef(name = "Type", width = 100, style = list(whiteSpace = "nowrap"), cell = function(value) gap_text(value, "missing")),
     verification_method = reactable::colDef(name = "Verify by", width = 110, style = list(whiteSpace = "nowrap"), cell = function(value) gap_text(value, "missing")),
     allocated_to = reactable::colDef(name = "Allocated to", minWidth = 110, cell = function(value) gap_text(value, "none")),

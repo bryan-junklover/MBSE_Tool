@@ -62,8 +62,15 @@ function mbToggleChat(open) {
     col.mbRail.hidden = !(closed || nar);
     col.mbRail.setAttribute("aria-expanded", String(!closed));
     col.mbSplit.hidden = closed || nar;
+    col.mbSplit.setAttribute("aria-valuenow", String(col.mbWidth));
+    if (nar && !closed) document.dispatchEvent(new Event("mb:overlay"));
   }
   function remember(col) { save(col.dataset.col, { w: col.mbWidth, closed: col.dataset.auto ? undefined : col.mbClosed }); }
+  function setWidth(col, width) {
+    col.mbWidth = Math.max(MIN, Math.min(MAX, width));
+    col.style.setProperty("--col-w", col.mbWidth + "px");
+    col.mbSplit.setAttribute("aria-valuenow", String(col.mbWidth));
+  }
   function setClosed(col, closed, byUser) {
     col.mbClosed = closed;
     if (byUser) col.mbChatClosed = false;
@@ -90,6 +97,10 @@ function mbToggleChat(open) {
     split.setAttribute("role", "separator");
     split.setAttribute("aria-orientation", "vertical");
     split.setAttribute("aria-label", "Resize " + label.toLowerCase());
+    split.setAttribute("aria-valuemin", String(MIN));
+    split.setAttribute("aria-valuemax", String(MAX));
+    split.tabIndex = 0;
+    split.title = "Drag, or use the arrow keys, to resize";
     var hide = document.createElement("button");
     hide.type = "button";
     hide.textContent = left ? "‹" : "›";
@@ -110,8 +121,7 @@ function mbToggleChat(open) {
       split.setPointerCapture(evt.pointerId);
       function move(e) {
         var dx = e.clientX - startX;
-        col.mbWidth = Math.max(MIN, Math.min(MAX, startW + (left ? dx : -dx)));
-        col.style.setProperty("--col-w", col.mbWidth + "px");
+        setWidth(col, startW + (left ? dx : -dx));
       }
       function up() {
         split.classList.remove("mb-dragging");
@@ -124,6 +134,18 @@ function mbToggleChat(open) {
       split.addEventListener("pointerup", up);
     });
     split.addEventListener("dblclick", function () { setClosed(col, true, true); });
+    // Arrow keys grow or shrink the column by 16 px (Shift: 64); Home and End go to the limits.
+    split.addEventListener("keydown", function (evt) {
+      if (evt.target !== split) return;
+      var step = evt.shiftKey ? 64 : 16, grow = left ? "ArrowRight" : "ArrowLeft", shrink = left ? "ArrowLeft" : "ArrowRight";
+      var next = evt.key === grow ? col.mbWidth + step : evt.key === shrink ? col.mbWidth - step :
+        evt.key === "Home" ? MIN : evt.key === "End" ? MAX : null;
+      if (next == null) return;
+      evt.preventDefault();
+      setWidth(col, next);
+      remember(col);
+      window.dispatchEvent(new Event("resize"));
+    });
     columns.push(col);
     apply(col);
   }

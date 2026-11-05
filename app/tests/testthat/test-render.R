@@ -11,7 +11,9 @@ test_that("the gate panel states score, result and hard rules first", {
   html <- html_of(render_gate(check_requirement("The system should be reliable.")))
   expect_match(html, "score 0 · FAIL", fixed = TRUE)
   expect_match(html, "banned wording", fixed = TRUE)
-  expect_lt(regexpr("banned wording", html)[1], regexpr("mb-ledger", html)[1])
+  # Said once, as the ledger's first row; the header verdict already counts it (re-review P2.5).
+  expect_length(gregexpr("banned wording", html, fixed = TRUE)[[1]], 1L)
+  expect_lt(regexpr("mb-ledger", html)[1], regexpr("banned wording", html)[1])
   passing <- html_of(render_gate(check_requirement("When armed, the door shall close within 2 s.")))
   expect_match(passing, "score 100 · PASS", fixed = TRUE)
   expect_match(passing, "+40", fixed = TRUE)
@@ -110,7 +112,7 @@ test_that("outline rows keep the id, a cut title with its full text, and a faili
                         gate_pass = c(1L, 0L), status = c("committed", "draft"), gate_score = c(100L, 0L), stringsAsFactors = FALSE)
   html <- html_of(render_outline(outline, "pick"))
   expect_match(html, 'title="STK-001 Map an area in one flight"', fixed = TRUE)
-  expect_match(html, "padding-left:18px", fixed = TRUE)
+  expect_match(html, "padding-left:14px", fixed = TRUE)
   expect_match(html, '<span class="mono mb-oscore">0</span>', fixed = TRUE)
 })
 

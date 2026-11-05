@@ -61,7 +61,6 @@ render_gate <- function(gate) {
     shiny::tags$div(class = "mb-head",
                     shiny::tags$span(class = "mb-label", "Gate · every edit · no AI"),
                     shiny::tags$b(class = paste("mb-push", if (!gate$passes_gate) "mb-gap"), verdict)),
-    lapply(blockers, function(b) shiny::tags$div(class = "mb-hard", b)),
     shiny::tags$div(class = "mb-ledger", unlist(c(hard, rows, banned), recursive = FALSE))
   )
 }
@@ -123,7 +122,7 @@ render_outline <- function(outline, select_input, selected = NULL) {
     title <- if (is.na(row$short_title)) "" else row$short_title
     shiny::tags$button(
       type = "button", class = paste("mb-outline-row", if (failing) "mb-gap"),
-      style = sprintf("padding-left:%dpx", 6L + 12L * row$depth),
+      style = sprintf("padding-left:%dpx", 6L + 8L * row$depth),
       title = trimws(paste(row$id, title)),
       `aria-current` = if (identical(row$id, selected)) "true" else NULL,
       onclick = event_js(select_input, row$id),

@@ -4,9 +4,9 @@ mod_baselines_ui <- function(id, tabs = NULL) {
   ns <- shiny::NS(id)
   shiny::tagList(
     screen_bar(tabs,
-               shiny::selectInput(ns("from"), "Compare", choices = character(0), width = "200px", selectize = FALSE),
+               shiny::selectInput(ns("from"), "Compare", choices = character(0), width = "auto", selectize = FALSE),
                shiny::tags$span(`aria-hidden` = "true", "→"),
-               shiny::selectInput(ns("to"), "with", choices = c("Working copy" = "working"), width = "200px", selectize = FALSE),
+               shiny::selectInput(ns("to"), "with", choices = c("Working copy" = "working"), width = "auto", selectize = FALSE),
                actions = shiny::tagList(shiny::actionButton(ns("rollback"), "Roll back…", class = "mb-btn"),
                                         shiny::uiOutput(ns("create_button"), inline = TRUE))),
     shiny::tags$div(class = "mb-body",

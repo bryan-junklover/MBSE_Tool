@@ -23,7 +23,7 @@ mod_write_ui <- function(id, tabs = NULL) {
                actions = shiny::actionButton(ns("new"), "New requirement", class = "mb-btn")),
     shiny::tags$div(
       class = "mb-body",
-      side_column("left", "write.outline", "Outline", width = 260,
+      side_column("left", "write.outline", "Outline", width = 280,
                   shiny::tags$div(class = "mb-label", "Specification outline"),
                   shiny::uiOutput(ns("outline")),
                   shiny::uiOutput(ns("actors_note"))),

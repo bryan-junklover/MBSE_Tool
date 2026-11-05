@@ -1,6 +1,6 @@
 Package: mbdiagram
 Title: Block Diagram Editing for ModelBench
-Version: 0.1.6
+Version: 0.1.7
 Authors@R: person("ModelBench", "Developers", role = c("aut", "cre"), email = "noreply@example.com")
 Description: An htmlwidget for editing block diagrams, built on JointJS and elkjs.
 License: file LICENSE
