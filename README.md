@@ -1,6 +1,6 @@
 # ModelBench
 
-Start with [BUILD_PLAN.md](BUILD_PLAN.md). The core package is in `modelbench/` and the Shiny shell in `app/`.
+Start with [BUILD_PLAN.md](BUILD_PLAN.md). Using the app is covered in [docs/USER_GUIDE.md](docs/USER_GUIDE.md). The core package is in `modelbench/` and the Shiny shell in `app/`.
 
 ```bash
 Rscript tools/run_tests.R
@@ -23,3 +23,5 @@ Rscript tools/install_widgets.R
 ```bash
 Rscript -e 'shiny::runApp("app")'
 ```
+
+The ICD export needs Quarto: RStudio bundles it, or set `QUARTO_PATH`. The PDF exports need Google Chrome.

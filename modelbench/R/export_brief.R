@@ -35,20 +35,4 @@ brief_html <- function(con) {
   )
 }
 
-# Prints the brief with headless Chrome. Refuses in plain words if Chrome isn't there.
-write_brief_pdf <- function(con, path) {
-  if (!requireNamespace("chromote", quietly = TRUE) || is.null(tryCatch(chromote::find_chrome(), error = function(e) NULL))) {
-    refuse("The PDF brief needs Google Chrome installed.")
-  }
-  page <- tempfile(fileext = ".html")
-  on.exit(unlink(page), add = TRUE)
-  writeLines(brief_html(con), page, useBytes = TRUE)
-  browser <- chromote::ChromoteSession$new()
-  on.exit(browser$close(), add = TRUE)
-  loaded <- browser$Page$loadEventFired(wait_ = FALSE)
-  browser$Page$navigate(paste0("file://", page), wait_ = FALSE)
-  browser$wait_for(loaded)
-  output <- browser$Page$printToPDF(printBackground = TRUE)
-  writeBin(jsonlite::base64_dec(output$data), path)
-  invisible(path)
-}
+write_brief_pdf <- function(con, path) print_html_pdf(brief_html(con), path, "The PDF brief")

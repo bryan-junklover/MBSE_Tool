@@ -9,9 +9,14 @@ mod_spec_ui <- function(id) {
       shiny::selectInput(ns("type"), NULL, choices = c("All types" = "all", REQ_TYPES), width = "160px"),
       shiny::checkboxInput(ns("low_first"), "Lowest score first", value = TRUE),
       shiny::tags$div(class = "mb-actions",
-                      shiny::fileInput(ns("import"), NULL, buttonLabel = "Import…", placeholder = "csv, xlsx or txt",
-                                       accept = c(".csv", ".xlsx", ".txt"), width = "260px"),
-                      shiny::actionButton(ns("add"), "+ Requirement", class = "mb-btn"))
+                      htmltools::tagQuery(shiny::fileInput(ns("import"), NULL, buttonLabel = "Import…", placeholder = "csv, xlsx or txt",
+                                                           accept = c(".csv", ".xlsx", ".txt"), width = "260px"))$
+                        find("input.form-control")$addAttrs(`aria-label` = "File to import")$allTags(),
+                      shiny::actionButton(ns("add"), "+ Requirement", class = "mb-btn"),
+                      shiny::tags$div(role = "group", `aria-label` = "Export", class = "mb-head",
+                                      shiny::tags$span(class = "mb-caption", "Export"),
+                                      export_button(ns("export_reqif"), "ReqIF"), export_button(ns("export_csv"), "CSV"),
+                                      export_button(ns("export_md"), "Markdown"), export_button(ns("export_pdf"), "PDF")))
     ),
     shiny::tags$div(
       class = "mb-body",
@@ -67,6 +72,10 @@ render_evidence <- function(cases, ns) {
 
 mod_spec_server <- function(id, state) {
   shiny::moduleServer(id, function(input, output, session) {
+    output$export_reqif <- export_handler(state$con, "requirements", "reqif", export_reqif)
+    output$export_csv <- export_handler(state$con, "requirements", "csv", export_csv)
+    output$export_md <- export_handler(state$con, "requirements", "md", export_markdown)
+    output$export_pdf <- export_handler(state$con, "requirements", "pdf", export_requirements_pdf)
     ns <- session$ns
     con <- state$con
     selected <- state$selected_requirement

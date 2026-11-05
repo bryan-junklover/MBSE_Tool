@@ -377,6 +377,15 @@ insert_proposal <- function(con, fields) {
   id
 }
 
+# The chat's "Attach to proposal": adds text to an open proposal without resolving it.
+append_proposal_body <- function(con, id, text) {
+  row <- DBI::dbGetQuery(con, "SELECT body, status FROM ai_proposal WHERE id = ?", params = list(id))
+  if (nrow(row) == 0L || row$status != "open") refuse("Only an open proposal can take an attachment.")
+  body <- if (is.na(row$body) || !nzchar(row$body)) text else paste(row$body, text, sep = "\n\n")
+  DBI::dbExecute(con, "UPDATE ai_proposal SET body = ? WHERE id = ?", params = list(body, id))
+  invisible(NULL)
+}
+
 update_proposal <- function(con, id, fields) {
   fields <- null_to_na(c(fields, list(resolved_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))))
   sets <- paste(sprintf("%s = ?", names(fields)), collapse = ", ")

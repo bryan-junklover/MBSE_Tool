@@ -68,6 +68,13 @@ test_that("the simulator runs from buttons and the checks stay live", {
     expect_equal(sim_now()$clock, 3)
     session$setInputs(reset = 1)
     expect_identical(sim_now()$current, "S-DIS")
+    # Checklist item 10: start in Survey mission, fire gnss_lost, Return to home at T+3 s.
+    session$setInputs(start_in = list(value = "S-MIS"))
+    session$setInputs(fire_event = "gnss_lost")
+    expect_identical(c(sim_now()$current, format(sim_now()$clock)), c("S-RTH", "3"))
+    session$setInputs(reset = 2)
+    expect_identical(sim_now()$current, "S-MIS")
+    session$setInputs(start_in = list(value = "S-DIS"))
     session$setInputs(set_variable = list(name = "soc", value = "12"))
     expect_equal(sim_now()$variables$soc, 12)
     session$setInputs(set_variable = list(name = "gnss_valid", value = "maybe"))
@@ -122,4 +129,9 @@ test_that("the Baselines link goes to Behavioral impact with that change", {
     expect_identical(state$behavior_focus(), "CS-9")
     expect_identical(state$nav()$tab, "Behavioral impact")
   })
+})
+
+test_that("a change with no extra fields still sends its value (an empty list was a JS array)", {
+  expect_match(change_js("x", list()), "Object.assign({}, {value: this.value", fixed = TRUE)
+  expect_match(change_js("x", list(id = "A")), "Object.assign({\"id\":\"A\"}", fixed = TRUE)
 })

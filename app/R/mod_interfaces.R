@@ -10,7 +10,9 @@ mod_interfaces_ui <- function(id) {
     shiny::tags$aside(class = "mb-left",
                       shiny::textInput(ns("filter"), "Filter", placeholder = "Name"),
                       shiny::uiOutput(ns("list")),
-                      shiny::tags$div(shiny::actionButton(ns("add"), "+ Interface", class = "mb-btn"))),
+                      shiny::tags$div(shiny::actionButton(ns("add"), "+ Interface", class = "mb-btn")),
+                      shiny::tags$div(class = "mb-label", style = "margin-top:16px", "Interface control document"),
+                      shiny::tags$div(class = "mb-head", export_button(ns("icd_html"), "ICD (HTML)"), export_button(ns("icd_pdf"), "ICD (PDF)"))),
     shiny::tags$main(class = "mb-main", shiny::uiOutput(ns("form")), shiny::uiOutput(ns("fields"))),
     shiny::tags$aside(class = "mb-right", shiny::uiOutput(ns("used")))
   )
@@ -56,6 +58,8 @@ render_where_used <- function(used) {
 
 mod_interfaces_server <- function(id, state) {
   shiny::moduleServer(id, function(input, output, session) {
+    output$icd_html <- export_handler(state$con, "ICD", "html", function(con, file) render_icd(con, file, "html"))
+    output$icd_pdf <- export_handler(state$con, "ICD", "pdf", function(con, file) render_icd(con, file, "pdf"))
     ns <- session$ns
     con <- state$con
     selected <- state$selected_interface

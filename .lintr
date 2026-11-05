@@ -7,6 +7,12 @@ linters: linters_with_defaults(
     commented_code_linter = NULL
   )
 exclusions: list(
+    "modelbench/R/chat.R" = list(line_length_linter = Inf),
+    "modelbench/R/export.R" = list(line_length_linter = Inf),
+    "app/R/mod_chat.R" = list(line_length_linter = Inf),
+    "modelbench/tests/testthat/test-export.R" = list(line_length_linter = Inf),
+    "modelbench/tests/testthat/test-chat.R" = list(line_length_linter = Inf),
+    "app/tests/testthat/test-mod_chat.R" = list(line_length_linter = Inf),
     "modelbench/R/sm_sim.R" = list(line_length_linter = Inf),
     "modelbench/R/behavior.R" = list(line_length_linter = Inf),
     "modelbench/R/ai_behavior.R" = list(line_length_linter = Inf),

@@ -34,3 +34,12 @@
   });
   $(document).on("dragend", "tr[data-row-id]", function () { dragged = null; });
 })();
+
+// The docked chat. Its state is a class on the body, so the layout can make room.
+function mbToggleChat(open) {
+  var on = typeof open === "boolean" ? open : !document.body.classList.contains("mb-chat-open");
+  document.body.classList.toggle("mb-chat-open", on);
+  var toggle = document.querySelector(".mb-chat-toggle");
+  if (toggle) toggle.setAttribute("aria-expanded", String(on));
+  if (on) { var box = document.querySelector("#mb-chat textarea"); if (box) box.focus(); }
+}

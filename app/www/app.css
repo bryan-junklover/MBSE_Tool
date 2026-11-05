@@ -189,3 +189,16 @@ select.mb-table-input { min-width: 92px; }
 .mb-check-fail { color: var(--gap-text); font-weight: 600; }
 .mb-compare { display: flex; flex-wrap: wrap; gap: 16px; }
 .mb-compare > * { flex: 1 1 420px; min-width: 0; }
+
+/* Chat */
+.mb-chat { display: none; position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100vw); z-index: 1040; background: var(--surface); border-left: 1px solid var(--line); padding: 12px 14px; flex-direction: column; gap: 8px; box-shadow: -4px 0 16px rgba(0,0,0,.06); }
+body.mb-chat-open .mb-chat { display: flex; }
+@media (min-width: 1200px) { body.mb-chat-open > div:first-of-type { margin-right: 420px; } }
+.mb-chat shiny-chat-container { flex: 1 1 auto; min-height: 0; }
+.mb-tool-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.mb-tool-chip { font-family: var(--font-mono); font-size: 11px; padding: 1px 6px; border: 1px solid var(--ai-border); border-radius: 3px; color: var(--ai-text); background: var(--ai-tint); }
+.mb-chat-actions { display: flex; flex-direction: column; gap: 6px; }
+.mb-chat-toggle { margin-left: 12px; }
+
+/* Focus is always visible (handoff §7). */
+:focus-visible { outline: 2px solid var(--ai) !important; outline-offset: 2px; }

@@ -169,6 +169,7 @@ blocked_text <- function(kind) {
          local_only = "Local only is on, and this task has no local model. Pick one in Project, or turn Local only off.",
          spend_cap = "Today's cloud spend has reached the cap, so cloud calls are blocked until tomorrow. Change the cap in Project.",
          not_found = "This task has no model chosen. Pick one in Project.",
+         no_key = "This task's cloud model has no API key, and there's no local model for it. Add a key or pick a local model in Project.",
          "This call was blocked.")
 }
 

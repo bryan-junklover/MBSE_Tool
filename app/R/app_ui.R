@@ -10,8 +10,11 @@ asset_url <- function(file) {
 app_theme <- function() {
   bslib::bs_theme(
     version = 5, bg = "#F4F4F2", fg = "#1C1D1F", primary = "#1C1D1F", secondary = "#5B5E63",
-    info = "#2F5BD3", warning = "#B35A00", base_font = "IBM Plex Sans, system-ui, sans-serif",
-    code_font = "IBM Plex Mono, ui-monospace, monospace", "border-radius" = "4px", "border-color" = "#D4D5D8",
+    info = "#2F5BD3", warning = "#B35A00",
+    # The fonts ship in www/fonts and are declared in fonts.css, so nothing loads from Google
+    # at runtime (handoff §6.3). bslib::font_face() keeps one face per family, dropping weights.
+    base_font = "'IBM Plex Sans', system-ui, sans-serif", code_font = "'IBM Plex Mono', ui-monospace, monospace",
+    "border-radius" = "4px", "border-color" = "#D4D5D8",
     "font-size-base" = "0.875rem", "link-color" = "#2F5BD3"
   )
 }
@@ -24,6 +27,7 @@ app_ui <- function() {
   bslib::page_fillable(
     theme = app_theme(), padding = 0, gap = 0, fillable_mobile = FALSE, title = "ModelBench",
     shiny::tags$head(
+      shiny::tags$link(rel = "stylesheet", href = asset_url("fonts.css")),
       shiny::tags$link(rel = "stylesheet", href = asset_url("tokens.css")),
       shiny::tags$link(rel = "stylesheet", href = asset_url("app.css")),
       shiny::tags$script(src = asset_url("app.js"))
@@ -36,7 +40,9 @@ app_ui <- function() {
                         shiny::tags$span(class = "mb-product", "ModelBench"),
                         shiny::textOutput("context", inline = TRUE, container = shiny::span) |>
                           htmltools::tagAppendAttributes(class = "mb-context")),
-        shiny::uiOutput("top_nav", container = shiny::tags$div, style = "margin-left:auto")
+        shiny::uiOutput("top_nav", container = shiny::tags$div, style = "margin-left:auto"),
+        shiny::tags$button(type = "button", class = "mb-btn mb-btn-ai mb-chat-toggle", `aria-controls` = "mb-chat", `aria-expanded` = "false",
+                           onclick = "mbToggleChat()", "Ask the model")
       ),
       shiny::uiOutput("status_strip"),
       bslib::navset_hidden(
@@ -85,7 +91,8 @@ app_ui <- function() {
           )
         )
       )
-    )
+    ),
+    mod_chat_ui("chat_panel")
   )
 }
 
@@ -195,4 +202,5 @@ app_server <- function(input, output, session) {
   mod_machines_server("machines", state)
   mod_behavior_impact_server("behavior_impact", state)
   mod_ai_settings_server("ai_settings", state)
+  mod_chat_server("chat_panel", state)
 }

@@ -1,0 +1,18 @@
+---
+title: "{{title}}: interface control document"
+date: "{{date}}"
+format:
+  html:
+    embed-resources: true
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    mainfont: "IBM Plex Sans, system-ui, sans-serif"
+    monofont: "IBM Plex Mono, ui-monospace, monospace"
+  typst:
+    toc: true
+    section-numbering: "1.1"
+    papersize: a4
+---
+
+{{body}}

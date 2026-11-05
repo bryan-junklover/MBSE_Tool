@@ -29,6 +29,16 @@ class Handler(BaseHTTPRequestHandler):
         time.sleep(DELAY)
         text = json.dumps(request.get("messages", ""))
         answer = COACH
+        if "answer questions about a system model" in text:
+            messages = request.get("messages", [])
+            if not any(m.get("role") == "tool" for m in messages):
+                self.send_json({"id": "x", "object": "chat.completion", "model": "mock-model", "choices": [{"index": 0, "finish_reason": "tool_calls",
+                                "message": {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1", "type": "function",
+                                "function": {"name": "find", "arguments": json.dumps({"text": "Power"})}}]}}], "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}})
+                return
+            self.send_json({"id": "x", "object": "chat.completion", "model": "mock-model", "choices": [{"index": 0, "finish_reason": "stop",
+                            "message": {"role": "assistant", "content": "E1 is the part that powers the aircraft. It weighs about 99 kg."}}], "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}})
+            return
         if "what a system model is missing" in text: answer = GAPS
         elif "how much a change matters" in text:
             answer = {"ratings": [{"n": "I1", "significance": "High", "reason": "Mock answer."}, {"n": "I2", "significance": "Medium", "reason": "Mock answer."}]}

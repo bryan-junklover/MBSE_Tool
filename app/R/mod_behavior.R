@@ -39,11 +39,11 @@ render_step_table <- function(steps, lifelines, interfaces, selected, ns) {
         `data-row-id` = step$id, draggable = "true", class = paste(if (step$review_state == "unreviewed") "mb-unreviewed", if (identical(step$id, selected)) "mb-row-selected"),
         onclick = sprintf("if (event.target.tagName === 'TD') { %s }", event_js(ns("select_step"), step$id)),
         shiny::tags$td(title = "Drag to reorder", "⋮⋮"),
-        shiny::tags$td(select_tag(c("message", "self", "note", "fragment_open", "fragment_else", "fragment_close"), step$step_kind, field("step_kind"))),
-        shiny::tags$td(if (has_ends) select_tag(lifeline_choices, blank_of(step$from_lifeline_id), field("from_lifeline_id"), "—")
-                       else if (step$step_kind == "fragment_open") select_tag(c("alt", "opt", "loop", "par"), blank_of(step$fragment_kind), field("fragment_kind"))),
-        shiny::tags$td(if (is_message) select_tag(lifeline_choices, blank_of(step$to_lifeline_id), field("to_lifeline_id"), "—")),
-        shiny::tags$td(if (is_message) select_tag(interface_choices, blank_of(step$interface_id), field("interface_id"), "None")),
+        shiny::tags$td(select_tag(c("message", "self", "note", "fragment_open", "fragment_else", "fragment_close"), step$step_kind, field("step_kind"), label = "Kind")),
+        shiny::tags$td(if (has_ends) select_tag(lifeline_choices, blank_of(step$from_lifeline_id), field("from_lifeline_id"), "—", label = "From")
+                       else if (step$step_kind == "fragment_open") select_tag(c("alt", "opt", "loop", "par"), blank_of(step$fragment_kind), field("fragment_kind"), label = "Fragment kind")),
+        shiny::tags$td(if (is_message) select_tag(lifeline_choices, blank_of(step$to_lifeline_id), field("to_lifeline_id"), "—", label = "To")),
+        shiny::tags$td(if (is_message) select_tag(interface_choices, blank_of(step$interface_id), field("interface_id"), "None", label = "Interface")),
         shiny::tags$td(if (is_message) shiny::tags$input(type = "text", value = blank_of(step$field_name), class = if (step$field_missing) "mb-field-missing", `aria-label` = "Field", onchange = field("field_name"))),
         shiny::tags$td(shiny::tags$input(type = "text", value = step$label, `aria-label` = "Label", onchange = field("label"))),
         shiny::tags$td(if (is_message || is_fragment) shiny::tags$input(type = "text", value = blank_of(step$guard), `aria-label` = "Guard", onchange = field("guard"))),
@@ -493,8 +493,15 @@ mod_machines_server <- function(id, state) {
       load_machine(con(), sm_id())
     })
     # A new machine, or an edit, restarts the run: the old trace no longer describes it.
-    shiny::observeEvent(machine(), sim(sim_start(machine())))
-    shiny::observeEvent(input$reset, sim(sim_start(machine())))
+    shiny::observeEvent(machine(), start_run())
+    # Reset goes back to where this run started, which may not be the start state.
+    start_run <- function(state_id = NULL) {
+      running <- sim_start(machine(), state_id)
+      running$started_in <- if (is.null(state_id)) machine()$initial_state_id else state_id
+      sim(running)
+    }
+    shiny::observeEvent(input$reset, start_run(shiny::isolate(sim())$started_in))
+    shiny::observeEvent(input$start_in, start_run(input$start_in$value))
 
     output$diagram <- renderMbdiagram({
       db_dep(state, "behavior")
@@ -522,6 +529,7 @@ mod_machines_server <- function(id, state) {
           shiny::tags$label(name, " ", shiny::tags$input(type = "text", value = if (is.logical(value)) tolower(as.character(value)) else format(value, trim = TRUE),
                                                          `aria-label` = name, onchange = change_js(ns("set_variable"), list(name = name))))
         }),
+        shiny::tags$label("Start in ", select_tag(stats::setNames(m$states$id, m$states$name), blank_of(running$started_in), change_js(ns("start_in"), list()))),
         shiny::actionButton(ns("reset"), "Reset", class = "mb-btn mb-btn-small"),
         if (running$status != "ok") shiny::tags$span(class = "mb-gap", running$error)
       )
