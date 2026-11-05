@@ -62,7 +62,7 @@ mod_chat_server <- function(id, state) {
         if (length(answer$elements) > 0L) shiny::actionButton(ns("highlight"), sprintf("Highlight on diagram (%d)", length(answer$elements)), class = "mb-btn mb-btn-small"),
         if (nrow(open) > 0L) {
           shiny::tags$div(class = "mb-head",
-                          shiny::selectInput(ns("proposal"), NULL, stats::setNames(open$id, sprintf("%s %s", open$id, open$title)), width = "100%"),
+                          shiny::selectInput(ns("proposal"), NULL, stats::setNames(open$id, sprintf("%s %s", open$id, open$title)), width = "100%", selectize = FALSE),
                           shiny::actionButton(ns("attach"), "Attach to proposal", class = "mb-btn mb-btn-small"))
         }
       )

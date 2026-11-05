@@ -16,37 +16,62 @@ MODE_TOOLS <- list(
   functional = c("Select" = "select", "Function" = "component", "Port" = "port", "Connect" = "connect")
 )
 
-mod_model_ui <- function(id, mode = "structure") {
+# A line sample beside each flow type, so the checkbox doubles as the legend (§2.13).
+flow_legend_label <- function(label, type) {
+  style <- switch(type, data = list(stroke = "#45484D", width = 2, dash = NA), energy = list(stroke = "#1C1D1F", width = 4, dash = NA),
+                  list(stroke = "#9A9DA3", width = 2, dash = "6 4"))
+  shiny::tags$span(style = "display:inline-flex;align-items:center;gap:8px",
+                   htmltools::tag("svg", list(width = 24, height = 10, `aria-hidden` = "true",
+                                              htmltools::tag("line", list(x1 = 0, y1 = 5, x2 = 24, y2 = 5, stroke = style$stroke, `stroke-width` = style$width,
+                                                                          `stroke-dasharray` = if (!is.na(style$dash)) style$dash)))),
+                   label)
+}
+
+mod_model_ui <- function(id, mode = "structure", tabs = NULL) {
   ns <- shiny::NS(id)
-  shiny::tags$div(
-    class = "mb-body",
-    shiny::tags$aside(class = "mb-left",
-                      if (mode == "flows") {
-                        shiny::tagList(
-                          shiny::checkboxGroupInput(ns("flow_types"), "Show", choices = c("Data" = "data", "Energy" = "energy", "Matter" = "matter"),
-                                                    selected = c("data", "energy", "matter")),
-                          shiny::checkboxInput(ns("quantities"), "Show flow quantities", value = TRUE),
-                          shiny::tags$span(class = "mb-caption", "Same components and ports as Structure; this view shows what moves along each connector."))
-                      },
-                      shiny::tags$div(class = "mb-label", if (mode == "functional") "Functions" else "Model tree"),
-                      shiny::uiOutput(ns("tree")),
-                      if (mode == "structure") shiny::selectInput(ns("view"), "Saved view", choices = c("All components" = "VW-all"))),
-    shiny::tags$main(
-      class = "mb-main",
-      shiny::uiOutput(ns("crumbs")),
-      shiny::tags$div(class = "mb-toolbar",
-                      shiny::uiOutput(ns("tools")),
-                      if (mode == "structure") shiny::actionButton(ns("group"), "Group into subsystem", class = "mb-btn"),
-                      shiny::actionButton(ns("undo"), "Undo", class = "mb-btn"),
-                      shiny::actionButton(ns("redo"), "Redo", class = "mb-btn"),
-                      shiny::actionButton(ns("auto_layout"), "Auto-layout", class = "mb-btn")),
-      shiny::tags$div(class = "mb-caption", shiny::textOutput(ns("hint"), inline = TRUE)),
-      shiny::tags$div(class = "mb-diagram", mbdiagramOutput(ns("diagram"), height = "560px")),
-      shiny::uiOutput(ns("facts")),
-      shiny::uiOutput(ns("connections")),
-      if (mode == "functional") shiny::uiOutput(ns("realisation"))
+  click <- function(input, label, ...) shiny::tags$button(type = "button", class = "mb-btn", onclick = event_js(ns(input), "go"), ..., label)
+  more <- shiny::tagList(
+    if (mode == "structure") click("group", "Group into subsystem", title = "Group the selected components into a new subsystem"),
+    click("auto_layout", "Auto-layout", title = "Lay the diagram out again; pinned blocks stay put")
+  )
+  shiny::tagList(
+    screen_bar(
+      tabs,
+      actions = shiny::tagList(
+        shiny::actionButton(ns("undo"), "Undo", class = "mb-btn", title = "Undo (⌘Z or Ctrl+Z on the canvas)"),
+        shiny::actionButton(ns("redo"), "Redo", class = "mb-btn", title = "Redo (⇧⌘Z or Ctrl+Shift+Z on the canvas)"),
+        shiny::tags$span(class = "mb-divider", `aria-hidden` = "true"),
+        shiny::tags$span(class = "mb-wide-only", more),
+        shiny::tags$details(class = "mb-menu mb-narrow-only",
+                            shiny::tags$summary(class = "mb-btn", `aria-label` = "More diagram actions", "More ▾"),
+                            shiny::tags$div(class = "mb-menu-list", more))
+      )
     ),
-    shiny::tags$aside(class = "mb-right", shiny::uiOutput(ns("inspector")))
+    shiny::tags$div(
+      class = "mb-body",
+      side_column("left", paste0(id, ".tree"), if (mode == "functional") "Functions" else "Model tree", width = 240,
+                  if (mode == "flows") {
+                    shiny::tagList(
+                      shiny::checkboxGroupInput(ns("flow_types"), "Show", choiceNames = list(flow_legend_label("Data", "data"), flow_legend_label("Energy", "energy"), flow_legend_label("Matter", "matter")),
+                                                choiceValues = c("data", "energy", "matter"), selected = c("data", "energy", "matter")),
+                      shiny::checkboxInput(ns("quantities"), "Show flow quantities", value = TRUE),
+                      shiny::tags$span(class = "mb-caption", "Same components and ports as Structure; this view shows what moves along each connector."))
+                  },
+                  shiny::tags$div(class = "mb-label", if (mode == "functional") "Functions" else "Model tree"),
+                  shiny::uiOutput(ns("tree")),
+                  if (mode == "structure") shiny::selectInput(ns("view"), "Saved view", choices = c("All components" = "VW-all"), selectize = FALSE)),
+      shiny::tags$main(
+        class = "mb-main",
+        shiny::tags$div(class = "mb-toolbar",
+                        shiny::uiOutput(ns("crumbs")),
+                        shiny::uiOutput(ns("tools")),
+                        shiny::tags$span(class = "mb-caption", shiny::textOutput(ns("hint"), inline = TRUE))),
+        shiny::tags$div(class = "mb-diagram", mbdiagramOutput(ns("diagram"))),
+        shiny::tags$div(class = "mb-canvas-foot", shiny::uiOutput(ns("facts"), inline = TRUE), shiny::uiOutput(ns("connections"))),
+        if (mode == "functional") shiny::uiOutput(ns("realisation"))
+      ),
+      side_column("right", paste0(id, ".inspector"), "Inspector", width = 340, shiny::uiOutput(ns("inspector")))
+    )
   )
 }
 
@@ -70,11 +95,15 @@ render_crumbs <- function(path, names, open_input) {
   }))
 }
 
+level_count <- function(view) sprintf("%d components on this level · %d connectors", nrow(view$nodes), nrow(view$edges))
+
+# The level's numbers. With nothing selected they fill the inspector (UX review §4.4).
 render_facts <- function(view, budgets, analyses, findings) {
   gaps <- sum(view$nodes$gap)
   shiny::tags$div(
-    class = "mb-facts",
-    shiny::tags$span(sprintf("%d components · %d connectors", nrow(view$nodes), nrow(view$edges))),
+    class = "mb-facts mb-facts-stack",
+    shiny::tags$div(class = "mb-label", "This level"),
+    shiny::tags$span(level_count(view)),
     lapply(seq_len(nrow(budgets)), function(i) {
       shiny::tags$span(class = if (!budgets$pass[i]) "mb-gap",
                        sprintf("%s %s%s", budgets$label[i], budgets$text[i], if (!budgets$pass[i]) " · FAIL" else ""))
@@ -168,8 +197,10 @@ render_element_inspector <- function(row, properties, ports, requirements, stere
         list(shiny::tags$span(class = if (no_iface || !port$connected) "mb-gap",
                               sprintf("%s · %s · %s%s", port$name, port$direction, if (no_iface) "no interface" else port$interface,
                                       if (port$connected) "" else " · no connector")),
-             shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", `aria-label` = paste("Remove port", port$name),
-                                onclick = event_js(ns("remove_port"), port$id), "Remove"))
+             confirm_button("Remove", ns("remove_port"), port$id, sprintf("Remove port %s?", port$name),
+                            sprintf("%s loses its port %s%s.", row$name, port$name, if (port$connected) " and the connector on it" else ""),
+                            confirm = "Remove port", class = "mb-btn mb-btn-small") |>
+               htmltools::tagAppendAttributes(`aria-label` = paste("Remove port", port$name)))
       }), recursive = FALSE))
     } else {
       shiny::tags$span(class = "mb-caption", "No ports yet.")
@@ -183,7 +214,10 @@ render_element_inspector <- function(row, properties, ports, requirements, stere
     shiny::tags$label(shiny::tags$input(type = "checkbox", checked = if (pinned) NA,
                                         onchange = sprintf("Shiny.setInputValue('%s', {on: this.checked, n: Math.random()}, {priority: 'event'})", ns("pin"))),
                       " Keep this position on auto-layout"),
-    shiny::tags$div(shiny::tags$button(type = "button", class = "mb-btn", onclick = event_js(ns("delete_element"), row$id), "Delete from the model"))
+    danger_zone(confirm_button(sprintf("Delete %s…", row$name), ns("delete_element"), row$id, sprintf("Delete %s?", row$name),
+                               sprintf("It goes from the model with its %d port%s and %d requirement link%s. Undo brings it back.", nrow(ports), if (nrow(ports) == 1L) "" else "s",
+                                       nrow(requirements), if (nrow(requirements) == 1L) "" else "s"),
+                               confirm = "Delete from the model"))
   )
 }
 
@@ -199,7 +233,9 @@ render_connector_inspector <- function(row, ns, carriers = NULL) {
       labelled("Carried by", select_tag(carriers$choices, if (length(carriers$selected) == 1L) carriers$selected else "",
                                         change_js(ns("realize"), list(id = row$id)), "Any connector that joins them"))
     },
-    shiny::tags$div(shiny::tags$button(type = "button", class = "mb-btn", onclick = event_js(ns("delete_connector"), row$id), "Delete connector"))
+    danger_zone(confirm_button("Delete connector…", ns("delete_connector"), row$id, "Delete this connector?",
+                               sprintf("%s.%s and %s.%s are no longer connected. Undo brings it back.", row$source_element, row$source_port, row$target_element, row$target_port),
+                               confirm = "Delete connector"))
   )
 }
 
@@ -279,7 +315,10 @@ mod_model_server <- function(id, state, mode = "structure") {
       mbdiagram(list(mode = mode, root = view$root, nodes = view$nodes, ports = view$ports, boundary_ports = view$boundary_ports, edges = view$edges,
                      selected = as.list(shiny::isolate(selection()$ids)), tool = shiny::isolate(tool())))
     })
-    shiny::observeEvent(selection(), mbdiagram_send(session, "diagram", "set_selection", list(ids = as.list(selection()$ids))))
+    shiny::observeEvent(selection(), {
+      mbdiagram_send(session, "diagram", "set_selection", list(ids = as.list(selection()$ids)))
+      reveal_column(session, "inspector", length(selection()$ids) > 0L)
+    })
     shiny::observeEvent(tool(), mbdiagram_send(session, "diagram", "set_tool", list(tool = tool())))
 
     tree <- shiny::reactive({
@@ -315,10 +354,12 @@ mod_model_server <- function(id, state, mode = "structure") {
     output$facts <- shiny::renderUI({
       view <- view_data()
       if (mode == "functional") {
-        return(shiny::tags$div(class = "mb-facts", shiny::tags$span(sprintf("%d functions · %d flows", nrow(view$nodes), nrow(view$edges))),
-                               if (any(view$nodes$unallocated)) shiny::tags$span(class = "mb-gap", sprintf("%d unallocated", sum(view$nodes$unallocated)))))
+        return(shiny::tagList(shiny::tags$span(sprintf("%d functions · %d flows", nrow(view$nodes), nrow(view$edges))),
+                              if (any(view$nodes$unallocated)) shiny::tags$span(class = "mb-gap", sprintf("%d unallocated", sum(view$nodes$unallocated)))))
       }
-      render_facts(view, budget_status(con()), analysis_status(con()), element_gate_findings(con()))
+      gaps <- sum(view$nodes$gap)
+      shiny::tagList(shiny::tags$span(level_count(view)),
+                     if (gaps > 0L) shiny::tags$span(class = "mb-gap", sprintf("%d open gap%s", gaps, if (gaps == 1L) "" else "s")))
     })
     if (mode == "functional") {
       output$realisation <- shiny::renderUI({
@@ -344,15 +385,8 @@ mod_model_server <- function(id, state, mode = "structure") {
       shiny::updateActionButton(session, "undo", disabled = length(stack$undo) == 0L)
       shiny::updateActionButton(session, "redo", disabled = length(stack$redo) == 0L)
     })
-    run_stack <- function(action) {
-      stack <- guarded_edit(action(con(), state$commands()))
-      if (is.null(stack)) return(invisible(NULL))
-      state$commands(stack)
-      invalidate_db(state, c("model", "spec", "behavior"))
-      redraw(redraw() + 1L)
-    }
-    shiny::observeEvent(input$undo, run_stack(undo_command))
-    shiny::observeEvent(input$redo, run_stack(redo_command))
+    shiny::observeEvent(input$undo, run_command(state, undo_command, redraw))
+    shiny::observeEvent(input$redo, run_command(state, redo_command, redraw))
     shiny::observeEvent(input$auto_layout, mbdiagram_send(session, "diagram", "auto_layout"))
 
     shiny::observeEvent(input$group, {
@@ -402,7 +436,9 @@ mod_model_server <- function(id, state, mode = "structure") {
             select_element(written$id)
           }
         },
-        add_port = ask_port(event$element, event$side)
+        add_port = ask_port(event$element, event$side),
+        undo = run_command(state, undo_command, redraw),
+        redo = run_command(state, redo_command, redraw)
       )
     })
 
@@ -412,8 +448,8 @@ mod_model_server <- function(id, state, mode = "structure") {
       shiny::showModal(shiny::modalDialog(
         title = "Add a port",
         shiny::textInput(ns("port_name"), "Name"),
-        shiny::selectInput(ns("port_direction"), "Direction", choices = c("in", "out", "inout")),
-        shiny::selectInput(ns("port_interface"), "Interface", choices = with_blank(stats::setNames(interfaces$id, interfaces$name), "None yet")),
+        shiny::selectInput(ns("port_direction"), "Direction", choices = c("in", "out", "inout"), selectize = FALSE),
+        shiny::selectInput(ns("port_interface"), "Interface", choices = with_blank(stats::setNames(interfaces$id, interfaces$name), "None yet"), selectize = FALSE),
         footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("port_confirm"), "Add port", class = "mb-btn mb-btn-primary"))
       ))
     }
@@ -435,8 +471,20 @@ mod_model_server <- function(id, state, mode = "structure") {
     output$inspector <- shiny::renderUI({
       db_dep(state, "model")
       chosen <- selection()
-      if (length(chosen$ids) == 0L) return(shiny::tags$p(class = "mb-caption", "Select a block or connector to see its details."))
+      if (length(chosen$ids) == 0L || !chosen$kind %in% c("element", "connector")) {
+        if (mode == "functional") return(shiny::tags$p(class = "mb-caption", "Select a function or flow to see its details."))
+        return(shiny::tagList(shiny::tags$p(class = "mb-caption", "Select a block or connector to see its details."),
+                              render_facts(view_data(), budget_status(con()), analysis_status(con()), element_gate_findings(con()))))
+      }
       if (length(chosen$ids) > 1L) return(shiny::tags$p(class = "mb-caption", sprintf("%d components selected.", length(chosen$ids))))
+      # The selection is shared across views; a function belongs to Functional, the rest to the others (§2.14).
+      if (chosen$kind == "element") {
+        picked <- read_entity(con(), "element", chosen$ids)
+        if (!is.null(picked) && (picked$kind == "function") != (mode == "functional")) {
+          return(shiny::tags$p(class = "mb-caption", sprintf("%s is selected in %s. Select something here to see its details.",
+                                                             picked$name, if (picked$kind == "function") "Functional" else "Structure")))
+        }
+      }
       if (chosen$kind == "connector") {
         row <- connector_detail(con(), chosen$ids)
         if (nrow(row) == 0L) return(NULL)

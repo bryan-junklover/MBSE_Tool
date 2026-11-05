@@ -13,6 +13,8 @@ new_app_state <- function(con) {
     commands = shiny::reactiveVal(new_command_stack()),
     open_in_write = shiny::reactiveVal(NULL),
     behavior_focus = shiny::reactiveVal(NULL),
+    # Where a jump came from, so the target screen can offer the way back (UX review §2.26).
+    return_to = shiny::reactiveVal(NULL),
     nav = shiny::reactiveVal(list(workspace = "Write", tab = "Draft"))
   )
 }
@@ -90,4 +92,49 @@ export_button <- function(id, label) shiny::downloadButton(id, label, class = "m
 change_js <- function(input_id, fields) {
   sprintf("Shiny.setInputValue('%s', Object.assign(%s, {value: this.value, n: Math.random()}), {priority: 'event'})",
           input_id, if (length(fields) == 0L) "{}" else jsonlite::toJSON(fields, auto_unbox = TRUE))
+}
+
+# Undo and redo, from a button or a keyboard shortcut on a diagram.
+run_command <- function(state, action, redraw = NULL) {
+  con <- shiny::isolate(state$con())
+  stack <- guarded_edit(action(con, shiny::isolate(state$commands())))
+  if (is.null(stack)) return(invisible(NULL))
+  state$commands(stack)
+  invalidate_db(state, c("model", "spec", "behavior"))
+  if (!is.null(redraw)) redraw(shiny::isolate(redraw()) + 1L)
+  invisible(stack)
+}
+
+# The screen bar: the workspace's tabs, the screen's own controls, then its actions on the
+# right (UX review §4.5). One bar per screen, so the chrome takes a single row.
+screen_bar <- function(tabs = NULL, ..., actions = NULL) {
+  shiny::tags$div(class = "mb-tabbar", tabs, ..., if (!is.null(actions)) shiny::tags$div(class = "mb-actions", actions))
+}
+
+# A side column that can be resized and hidden (UX review §1.4). `key` names where its
+# width is kept; `auto` columns start hidden and open when something is selected.
+side_column <- function(side, key, label, ..., width = NULL, auto = FALSE, closed = FALSE, class = NULL, style = NULL) {
+  shiny::tags$aside(class = paste(if (side == "left") "mb-left" else "mb-right", class), style = style,
+                    `data-col` = key, `data-label` = label, `data-width` = width,
+                    `data-auto` = if (auto) "true", `data-closed` = if (closed) "true", ...)
+}
+
+# Opens (or, for auto columns, closes) the side column next to an element on this screen.
+reveal_column <- function(session, anchor_id, open = TRUE, side = "right") {
+  session$sendCustomMessage("mb_column", list(anchor = session$ns(anchor_id), side = side, open = open))
+}
+
+# A delete or remove control that asks first (UX review §4.2). The question names what goes.
+confirm_button <- function(label, input_id, value, title, body, confirm = sub("…$", "", label), class = "mb-btn") {
+  shiny::tags$button(type = "button", class = class, onclick = "mbConfirm(this)", `data-input` = input_id,
+                     `data-value` = as.character(jsonlite::toJSON(value, auto_unbox = TRUE)),
+                     `data-title` = title, `data-body` = body, `data-confirm` = confirm, label)
+}
+
+# Ends an inspector with its destructive actions, set apart by a rule.
+danger_zone <- function(...) shiny::tags$div(class = "mb-danger-zone", ...)
+
+# Names an unlabelled control inside a Shiny input, for screen readers.
+aria_label <- function(tag, element, label) {
+  htmltools::tagQuery(tag)$find(element)$addAttrs(`aria-label` = label)$allTags()
 }

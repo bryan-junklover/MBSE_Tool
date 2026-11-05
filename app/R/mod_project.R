@@ -1,35 +1,51 @@
 # Project workspace: which project is open, scope, glossary and id prefixes.
 
+PROJECT_SECTIONS <- c("General", "Glossary", "AI", "Data protection")
+
+# Project settings in four tabs, in a centred reading column (UX review §2.29).
 mod_project_ui <- function(id) {
   ns <- shiny::NS(id)
-  shiny::tags$div(
-    class = "mb-body",
-    shiny::tags$main(
-      class = "mb-main", style = "max-width:1200px",
-      shiny::tags$section(class = "mb-panel",
-                          shiny::tags$b("Project"),
-                          shiny::uiOutput(ns("project_picker")),
-                          shiny::tags$div(class = "mb-fields",
-                                          shiny::textInput(ns("new_name"), "New project name"),
-                                          shiny::tags$div(style = "align-self:end", shiny::actionButton(ns("create"), "Create project", class = "mb-btn")))),
-      shiny::tags$section(class = "mb-panel",
-                          shiny::tags$b("Scope"),
-                          shiny::textAreaInput(ns("scope"), "What this system is, in a few sentences. Saved as you type.", rows = 3, width = "100%")),
-      shiny::tags$section(class = "mb-panel",
-                          shiny::tags$b("Glossary"),
-                          shiny::tags$span(class = "mb-caption", "A term with an element is an alias of it. One with no element isn't a model term."),
-                          shiny::uiOutput(ns("glossary")),
-                          shiny::tags$div(class = "mb-fields",
-                                          shiny::textInput(ns("g_term"), "Term"),
-                                          shiny::textInput(ns("g_definition"), "Definition"),
-                                          shiny::selectInput(ns("g_element"), "Alias of", choices = with_blank(character(0), "No element")),
-                                          shiny::tags$div(style = "align-self:end", shiny::actionButton(ns("g_add"), "Add term", class = "mb-btn")))),
-      shiny::tags$section(class = "mb-panel",
-                          shiny::tags$b("ID prefixes"),
-                          shiny::tags$span(class = "mb-caption", "Used for new items. Existing ids never change."),
-                          shiny::uiOutput(ns("prefixes")),
-                          shiny::tags$div(shiny::actionButton(ns("save_prefixes"), "Save prefixes", class = "mb-btn"))),
-      mod_ai_settings_ui("ai_settings")
+  shiny::tagList(
+    screen_bar(shiny::uiOutput(ns("sections"))),
+    shiny::tags$div(
+      class = "mb-scroll",
+      shiny::tags$div(
+        class = "mb-reading mb-project",
+        bslib::navset_hidden(
+          id = ns("section"), selected = "General",
+          bslib::nav_panel_hidden(
+            "General",
+            shiny::tags$section(class = "mb-panel",
+                                shiny::tags$b("Project"),
+                                shiny::uiOutput(ns("project_picker")),
+                                shiny::tags$div(class = "mb-fields",
+                                                shiny::textInput(ns("new_name"), "New project name"),
+                                                shiny::tags$div(style = "align-self:end", shiny::actionButton(ns("create"), "Create project", class = "mb-btn")))),
+            shiny::tags$section(class = "mb-panel",
+                                shiny::tags$b("Scope"),
+                                shiny::textAreaInput(ns("scope"), "What this system is, in a few sentences. Saved as you type.", rows = 3, width = "100%")),
+            shiny::tags$section(class = "mb-panel",
+                                shiny::tags$b("ID prefixes"),
+                                shiny::tags$span(class = "mb-caption", "Used for new items. Existing ids never change."),
+                                shiny::uiOutput(ns("prefixes")),
+                                shiny::tags$div(shiny::actionButton(ns("save_prefixes"), "Save prefixes", class = "mb-btn")))
+          ),
+          bslib::nav_panel_hidden(
+            "Glossary",
+            shiny::tags$section(class = "mb-panel",
+                                shiny::tags$b("Glossary"),
+                                shiny::tags$span(class = "mb-caption", "A term with an element is an alias of it. One with no element isn't a model term."),
+                                shiny::uiOutput(ns("glossary")),
+                                shiny::tags$div(class = "mb-fields",
+                                                shiny::textInput(ns("g_term"), "Term"),
+                                                shiny::textInput(ns("g_definition"), "Definition"),
+                                                shiny::selectInput(ns("g_element"), "Alias of", choices = with_blank(character(0), "No element"), selectize = FALSE),
+                                                shiny::tags$div(style = "align-self:end", shiny::actionButton(ns("g_add"), "Add term", class = "mb-btn"))))
+          ),
+          bslib::nav_panel_hidden("AI", mod_ai_settings_ui("ai_settings", "ai")),
+          bslib::nav_panel_hidden("Data protection", mod_ai_settings_ui("ai_settings", "data"))
+        )
+      )
     )
   )
 }
@@ -39,12 +55,24 @@ mod_project_server <- function(id, state, workspace_dir) {
     ns <- session$ns
     con <- state$con
     refresh_projects <- shiny::reactiveVal(0L)
+    section <- shiny::reactiveVal("General")
+
+    output$sections <- shiny::renderUI({
+      shiny::tags$div(role = "tablist", `aria-label` = "Project", class = "mb-segmented", lapply(PROJECT_SECTIONS, function(name) {
+        on <- tolower(as.character(identical(section(), name)))
+        shiny::tags$button(type = "button", role = "tab", `aria-pressed` = on, `aria-selected` = on, onclick = event_js(ns("pick_section"), name), name)
+      }))
+    })
+    shiny::observeEvent(input$pick_section, {
+      section(input$pick_section)
+      shiny::updateTabsetPanel(session, "section", selected = input$pick_section)
+    })
 
     output$project_picker <- shiny::renderUI({
       refresh_projects()
       files <- list_projects(workspace_dir)
       current <- basename(DBI::dbGetInfo(con())$dbname)
-      shiny::selectInput(ns("project"), "Open project", choices = files, selected = current)
+      shiny::selectInput(ns("project"), "Open project", choices = files, selected = current, selectize = FALSE)
     })
     shiny::observeEvent(input$project, {
       target <- file.path(workspace_dir, input$project)

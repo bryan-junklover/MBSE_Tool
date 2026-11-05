@@ -3,21 +3,19 @@
 
 CHIP_LABELS <- c(not_started = "Not started", in_progress = "In progress", designed = "Designed", decision_needed = "Decision needed", open_question = "Open question")
 
-mod_stakeholder_ui <- function(id) {
+mod_stakeholder_ui <- function(id, tabs = NULL) {
   ns <- shiny::NS(id)
   shiny::tagList(
-    shiny::tags$div(class = "mb-tabbar",
-                    shiny::tags$span(class = "mb-caption", "A plain overview for people outside engineering."),
-                    shiny::tags$div(class = "mb-actions",
-                                    shiny::actionButton(ns("write"), "Write the summary with AI", class = "mb-btn mb-btn-ai"),
-                                    shiny::downloadButton(ns("brief"), "Export as PDF brief", class = "mb-btn", icon = NULL))),
-    shiny::uiOutput(ns("page"))
+    screen_bar(tabs, shiny::tags$span(class = "mb-caption", "A plain overview for people outside engineering."),
+               actions = shiny::tagList(shiny::actionButton(ns("write"), "Write the summary with AI", class = "mb-btn mb-btn-ai"),
+                                        shiny::downloadButton(ns("brief"), "Export as PDF brief", class = "mb-btn", icon = NULL))),
+    shiny::tags$div(class = "mb-scroll", shiny::uiOutput(ns("page")))
   )
 }
 
 render_stakeholder <- function(overview, go_input, status_line = NULL) {
   shiny::tags$div(
-    class = "mb-page-grid",
+    class = "mb-page-grid mb-reading", style = "max-width:1320px",
     shiny::tags$main(
       style = "flex:999 1 600px;min-width:0;display:flex;flex-direction:column;gap:20px",
       shiny::tags$section(class = "mb-panel",

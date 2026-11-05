@@ -94,3 +94,53 @@ test_that("select options always carry a label, even from unnamed choices", {
   expect_match(named, ">self</option>", fixed = TRUE)
   expect_false(grepl("></option>", html_of(select_tag(STEP_KINDS, "note", "")), fixed = TRUE))
 })
+
+test_that("the gate ledger marks each row in words and leads with the blocking rule", {
+  html <- html_of(render_gate(check_requirement("The system should be reliable.")))
+  expect_match(html, "FAIL (blocked by", fixed = TRUE)
+  expect_match(html, ">blocks<", fixed = TRUE)
+  expect_lt(regexpr(">blocks<", html)[1], regexpr(">pass<|>fail<|>n/a<", html)[1])
+  passing <- html_of(render_gate(check_requirement("When armed, the door shall close within 2 s.")))
+  expect_match(passing, ">pass<", fixed = TRUE)
+  expect_false(grepl("blocked by", passing, fixed = TRUE))
+})
+
+test_that("outline rows keep the id, a cut title with its full text, and a failing score", {
+  outline <- data.frame(id = c("STK-001", "SYS-003"), short_title = c("Map an area in one flight", "Reliable"), depth = c(0L, 1L),
+                        gate_pass = c(1L, 0L), status = c("committed", "draft"), gate_score = c(100L, 0L), stringsAsFactors = FALSE)
+  html <- html_of(render_outline(outline, "pick"))
+  expect_match(html, 'title="STK-001 Map an area in one flight"', fixed = TRUE)
+  expect_match(html, "padding-left:18px", fixed = TRUE)
+  expect_match(html, '<span class="mono mb-oscore">0</span>', fixed = TRUE)
+})
+
+test_that("each screen carries its own tab bar, and the shell is one frame", {
+  html <- as.character(app_ui())
+  expect_match(html, "mb-frame", fixed = TRUE)
+  expect_false(grepl("display:block;overflow:auto", html, fixed = TRUE))
+  # Draft's own bar shows Draft pressed, Specification's shows Specification.
+  expect_true(grepl('aria-pressed="true"[^>]*>Draft<', html))
+  expect_true(grepl('aria-pressed="true"[^>]*>Specification<', html))
+  expect_false(grepl("selectize-input", html, fixed = TRUE))
+})
+
+test_that("side columns say how to bring them back and where their width is kept", {
+  html <- html_of(side_column("right", "spec.inspector", "Details", "x", width = 360, auto = TRUE))
+  expect_match(html, 'data-col="spec.inspector"', fixed = TRUE)
+  expect_match(html, 'data-label="Details"', fixed = TRUE)
+  expect_match(html, 'data-auto="true"', fixed = TRUE)
+})
+
+test_that("a delete button asks first, and carries what to send", {
+  html <- html_of(confirm_button("Delete Payload Camera…", "m-delete_element", "C-007", "Delete Payload Camera?", "It goes."))
+  expect_match(html, 'onclick="mbConfirm(this)"', fixed = TRUE)
+  expect_match(html, 'data-input="m-delete_element"', fixed = TRUE)
+  expect_match(html, 'data-value="&quot;C-007&quot;"', fixed = TRUE)
+  expect_match(html, 'data-confirm="Delete Payload Camera"', fixed = TRUE)
+})
+
+test_that("a jump back bar names where it came from", {
+  html <- html_of(render_return_bar(list(label = "Payload Camera port trigger_in has no connector", from = list(workspace = "Analyze", tab = "Review queue")), "b", "d"))
+  expect_match(html, "From Review queue:", fixed = TRUE)
+  expect_match(html, "Back to review queue", fixed = TRUE)
+})

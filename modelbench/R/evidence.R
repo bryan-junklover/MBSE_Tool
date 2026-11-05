@@ -68,9 +68,10 @@ requirement_evidence <- function(con, requirement_id) {
     SELECT t.id, t.name, t.method FROM test_case t JOIN link l ON l.target_kind = 'test_case' AND l.target_id = t.id
      WHERE l.link_type = 'verified_by' AND l.source_kind = 'requirement' AND l.source_id = ? ORDER BY t.id", params = list(requirement_id))
   stale <- stale_evidence(con)
-  cases$result <- NA_character_
-  cases$recorded_at <- NA_character_
-  cases$stale <- NA_character_
+  # rep() keeps the columns when there are no cases, which a bare NA can't fill.
+  cases$result <- rep(NA_character_, nrow(cases))
+  cases$recorded_at <- rep(NA_character_, nrow(cases))
+  cases$stale <- rep(NA_character_, nrow(cases))
   for (i in seq_len(nrow(cases))) {
     latest <- DBI::dbGetQuery(con, "SELECT id, result, recorded_at FROM verification_record WHERE requirement_id = ? AND test_case_id = ? ORDER BY rowid DESC LIMIT 1",
                               params = list(requirement_id, cases$id[i]))

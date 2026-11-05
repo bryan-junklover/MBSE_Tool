@@ -1,33 +1,40 @@
 # Write › Specification: outline, table, inspector, and import with a triage queue.
 
-mod_spec_ui <- function(id) {
+export_menu <- function(...) {
+  shiny::tags$details(class = "mb-menu", shiny::tags$summary(class = "mb-btn", "Export ▾"),
+                      shiny::tags$div(class = "mb-menu-list", role = "group", `aria-label` = "Export", ...))
+}
+
+mod_spec_ui <- function(id, tabs = NULL) {
   ns <- shiny::NS(id)
   shiny::tagList(
-    shiny::tags$div(
-      class = "mb-tabbar",
-      shiny::textInput(ns("search"), NULL, placeholder = "Search ID or text", width = "200px"),
-      shiny::selectInput(ns("type"), NULL, choices = c("All types" = "all", REQ_TYPES), width = "160px"),
+    screen_bar(
+      tabs,
+      aria_label(shiny::textInput(ns("search"), NULL, placeholder = "Search ID or text", width = "200px"), "input", "Search ID or text"),
+      aria_label(shiny::selectInput(ns("type"), NULL, choices = c("All types" = "all", REQ_TYPES), width = "150px", selectize = FALSE), "select", "Type"),
       shiny::checkboxInput(ns("low_first"), "Lowest score first", value = TRUE),
-      shiny::tags$div(class = "mb-actions",
-                      htmltools::tagQuery(shiny::fileInput(ns("import"), NULL, buttonLabel = "Import…", placeholder = "csv, xlsx or txt",
-                                                           accept = c(".csv", ".xlsx", ".txt"), width = "260px"))$
-                        find("input.form-control")$addAttrs(`aria-label` = "File to import")$allTags(),
-                      shiny::actionButton(ns("add"), "+ Requirement", class = "mb-btn"),
-                      shiny::tags$div(role = "group", `aria-label` = "Export", class = "mb-head",
-                                      shiny::tags$span(class = "mb-caption", "Export"),
-                                      export_button(ns("export_reqif"), "ReqIF"), export_button(ns("export_csv"), "CSV"),
-                                      export_button(ns("export_md"), "Markdown"), export_button(ns("export_pdf"), "PDF")))
+      actions = shiny::tagList(
+        # A plain button that opens the file picker; the picker's text box isn't needed (§2.6).
+        shiny::tags$div(class = "mb-import",
+                        htmltools::tagQuery(shiny::fileInput(ns("import"), NULL, buttonLabel = "Import…", placeholder = "csv, xlsx or txt",
+                                                             accept = c(".csv", ".xlsx", ".txt")))$
+                          find("input")$filter(function(x, i) identical(x$attribs$type, "file"))$addAttrs(`aria-label` = "Import requirements from a csv, xlsx or txt file")$allTags()),
+        export_menu(export_button(ns("export_reqif"), "ReqIF"), export_button(ns("export_csv"), "CSV"),
+                    export_button(ns("export_md"), "Markdown"), export_button(ns("export_pdf"), "PDF")),
+        shiny::actionButton(ns("add"), "+ Requirement", class = "mb-btn mb-btn-primary mb-btn-compact")
+      )
     ),
     shiny::tags$div(
       class = "mb-body",
-      shiny::tags$aside(class = "mb-left",
-                        shiny::tags$div(class = "mb-label", "Outline"),
-                        shiny::uiOutput(ns("outline"))),
+      side_column("left", "spec.outline", "Outline", width = 260,
+                  shiny::tags$div(class = "mb-label", "Outline"),
+                  shiny::uiOutput(ns("outline"))),
       shiny::tags$main(class = "mb-main",
                        shiny::uiOutput(ns("triage")),
                        shiny::tags$div(class = "mb-table", reactable::reactableOutput(ns("table"))),
                        shiny::textOutput(ns("count"))),
-      shiny::tags$aside(class = "mb-right", shiny::uiOutput(ns("inspector")))
+      # Hidden until a requirement is chosen, so the table has the room (§2.5).
+      side_column("right", "spec.inspector", "Details", width = 360, auto = TRUE, shiny::uiOutput(ns("inspector")))
     )
   )
 }
@@ -40,11 +47,11 @@ spec_columns <- function() {
   list(
     id = reactable::colDef(name = "ID", width = 85, class = "mono"),
     text = reactable::colDef(name = "Requirement", minWidth = 220),
-    req_type = reactable::colDef(name = "Type", width = 95, cell = function(value) gap_text(value, "missing")),
-    verification_method = reactable::colDef(name = "Verify by", width = 105, cell = function(value) gap_text(value, "missing")),
+    req_type = reactable::colDef(name = "Type", width = 100, style = list(whiteSpace = "nowrap"), cell = function(value) gap_text(value, "missing")),
+    verification_method = reactable::colDef(name = "Verify by", width = 110, style = list(whiteSpace = "nowrap"), cell = function(value) gap_text(value, "missing")),
     allocated_to = reactable::colDef(name = "Allocated to", minWidth = 110, cell = function(value) gap_text(value, "none")),
-    status = reactable::colDef(name = "Status", width = 85),
-    gate_score = reactable::colDef(name = "Score", width = 60, class = "mono", cell = function(value, index) {
+    status = reactable::colDef(name = "Status", width = 90, style = list(whiteSpace = "nowrap")),
+    gate_score = reactable::colDef(name = "Score", width = 64, style = list(whiteSpace = "nowrap"), class = "mono", cell = function(value, index) {
       if (is.na(value)) return("")
       if (value < 50L) shiny::tags$span(class = "mb-gap", style = "font-weight:500", value) else value
     })
@@ -111,6 +118,7 @@ mod_spec_server <- function(id, state) {
       render_outline(requirement_outline(con()), ns("select"), selected())
     })
     shiny::observeEvent(input$select, selected(input$select))
+    shiny::observe(reveal_column(session, "inspector", !is.null(selected())))
 
     # --- Inspector: details save on change ---
     current <- shiny::reactive({
@@ -135,11 +143,15 @@ mod_spec_server <- function(id, state) {
           shiny::tags$div(class = "mono mb-caption", sprintf("%s · %s", id, row$status)),
           shiny::tags$div(style = "font-size:16px;line-height:1.4", row$text)
         ),
-        shiny::textInput(ns("d_title"), "Short title", value(row$short_title)),
-        shiny::selectInput(ns("d_parent"), "Parent", choices = with_blank(parents, "None"), selected = value(row$parent_id)),
-        shiny::selectInput(ns("d_type"), "Type", choices = with_blank(REQ_TYPES), selected = value(row$req_type)),
-        shiny::selectInput(ns("d_verify"), "Verify by", choices = with_blank(VERIFY_METHODS), selected = value(row$verification_method)),
-        shiny::textAreaInput(ns("d_rationale"), "Rationale", value(row$rationale), rows = 3),
+        # Two fields a row once the column is wide enough (§2.7).
+        shiny::tags$div(class = "mb-field-grid",
+                        shiny::textInput(ns("d_title"), "Short title", value(row$short_title)),
+                        shiny::selectInput(ns("d_parent"), "Parent", choices = with_blank(parents, "None"), selected = value(row$parent_id), selectize = FALSE),
+                        shiny::selectInput(ns("d_type"), "Type", choices = with_blank(REQ_TYPES), selected = value(row$req_type), selectize = FALSE),
+                        shiny::selectInput(ns("d_verify"), "Verify by", choices = with_blank(VERIFY_METHODS), selected = value(row$verification_method), selectize = FALSE)),
+        shiny::tags$details(class = "mb-fold", open = if (nzchar(value(row$rationale))) NA,
+                            shiny::tags$summary("Rationale"),
+                            aria_label(shiny::textAreaInput(ns("d_rationale"), NULL, value(row$rationale), rows = 3, width = "100%"), "textarea", "Rationale")),
         shiny::uiOutput(ns("findings")),
         shiny::uiOutput(ns("evidence")),
         shiny::actionButton(ns("rewrite"), "Rewrite it in Write", class = "mb-btn")
@@ -162,7 +174,7 @@ mod_spec_server <- function(id, state) {
       shiny::showModal(shiny::modalDialog(
         title = "Add a test case",
         shiny::textInput(ns("case_name"), "Name"),
-        shiny::selectInput(ns("case_method"), "Method", choices = VERIFY_METHODS),
+        shiny::selectInput(ns("case_method"), "Method", choices = VERIFY_METHODS, selectize = FALSE),
         footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("case_confirm"), "Add test case", class = "mb-btn mb-btn-primary"))
       ))
     })
@@ -177,7 +189,7 @@ mod_spec_server <- function(id, state) {
       pending_case(input$record)
       shiny::showModal(shiny::modalDialog(
         title = sprintf("Record a result for %s", input$record),
-        shiny::selectInput(ns("record_result"), "Result", choices = c("Pass" = "pass", "Fail" = "fail", "Inconclusive" = "inconclusive")),
+        shiny::selectInput(ns("record_result"), "Result", choices = c("Pass" = "pass", "Fail" = "fail", "Inconclusive" = "inconclusive"), selectize = FALSE),
         shiny::textInput(ns("record_ref"), "Evidence reference", placeholder = "Report id, file or link"),
         shiny::textAreaInput(ns("record_note"), "Note"),
         shiny::tags$p(class = "mb-caption", "It's stored against the model as it stands now, and goes stale if anything it depended on changes."),

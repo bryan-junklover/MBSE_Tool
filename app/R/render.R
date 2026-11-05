@@ -30,6 +30,8 @@ ledger_label <- function(item, status) {
 
 format_points <- function(points) if (points > 0) sprintf("+%d", points) else as.character(points)
 
+# The gate ledger. Each row says what it found in words as well as points, and the hard
+# rules that block a commit come first, in the ledger as well as above it (UX review §2.2).
 render_gate <- function(gate) {
   if (!nzchar(gate$text)) {
     return(shiny::tags$section(class = "mb-panel mb-gate",
@@ -37,21 +39,30 @@ render_gate <- function(gate) {
                                shiny::tags$span(class = "mb-caption", "Nothing to check yet.")))
   }
   blockers <- gate_blockers(gate)
-  rows <- unlist(lapply(seq_len(nrow(gate$ledger)), function(i) {
-    list(shiny::tags$span(format_points(as.integer(gate$ledger$Impact[i]))),
-         shiny::tags$span(ledger_label(gate$ledger$Item[i], gate$ledger$Status[i])))
-  }), recursive = FALSE)
-  banned <- lapply(gate$banned_words_found, function(word) {
-    list(shiny::tags$span("-10"), shiny::tags$span(sprintf('banned word "%s"', word)))
+  row <- function(points, mark, text, class = NULL) {
+    list(shiny::tags$span(points), shiny::tags$span(class = paste("mb-mark", class), mark), shiny::tags$span(class = class, text))
+  }
+  hard <- lapply(blockers, function(b) row("—", "blocks", b, "mb-gap"))
+  rows <- lapply(seq_len(nrow(gate$ledger)), function(i) {
+    impact <- as.integer(gate$ledger$Impact[i])
+    status <- isTRUE(gate$ledger$Status[i])
+    mark <- if (status) "pass" else if (impact < 0L) "fail" else "n/a"
+    row(format_points(impact), mark, ledger_label(gate$ledger$Item[i], status), if (mark == "fail") "mb-gap")
   })
+  banned <- lapply(gate$banned_words_found, function(word) row("-10", "fail", sprintf('banned word "%s"', word), "mb-gap"))
+  score <- as.integer(gate$score)
+  verdict <- if (gate$passes_gate) sprintf("score %d · PASS", score) else if (length(blockers) > 0L) {
+    sprintf("score %d · FAIL (blocked by %d rule%s)", score, length(blockers), if (length(blockers) == 1L) "" else "s")
+  } else {
+    sprintf("score %d · FAIL", score)
+  }
   shiny::tags$section(
     class = "mb-panel mb-gate",
     shiny::tags$div(class = "mb-head",
                     shiny::tags$span(class = "mb-label", "Gate · every edit · no AI"),
-                    shiny::tags$b(class = "mb-push",
-                                  sprintf("score %d · %s", as.integer(gate$score), if (gate$passes_gate) "PASS" else "FAIL"))),
+                    shiny::tags$b(class = paste("mb-push", if (!gate$passes_gate) "mb-gap"), verdict)),
     lapply(blockers, function(b) shiny::tags$div(class = "mb-hard", b)),
-    shiny::tags$div(class = "mb-ledger", rows, unlist(banned, recursive = FALSE))
+    shiny::tags$div(class = "mb-ledger", unlist(c(hard, rows, banned), recursive = FALSE))
   )
 }
 
@@ -103,19 +114,21 @@ render_terms <- function(terms, action_input) {
   )
 }
 
+# One line per requirement: the id in a fixed gutter, the title cut short with the whole
+# of it in the tooltip, and a failing score in its own column (UX review §2.3).
 render_outline <- function(outline, select_input, selected = NULL) {
   shiny::tags$div(class = "mb-outline", lapply(seq_len(nrow(outline)), function(i) {
     row <- outline[i, ]
     failing <- row$gate_pass == 0L && row$status == "draft"
     title <- if (is.na(row$short_title)) "" else row$short_title
     shiny::tags$button(
-      type = "button",
-      style = sprintf("padding-left:%dpx", 6L + 14L * row$depth),
+      type = "button", class = paste("mb-outline-row", if (failing) "mb-gap"),
+      style = sprintf("padding-left:%dpx", 6L + 12L * row$depth),
+      title = trimws(paste(row$id, title)),
       `aria-current` = if (identical(row$id, selected)) "true" else NULL,
-      class = if (failing) "mb-gap" else NULL,
       onclick = event_js(select_input, row$id),
-      shiny::tags$span(class = "mono", row$id), " ", title,
-      if (failing && !is.na(row$gate_score)) sprintf(" · %d", row$gate_score)
+      shiny::tags$span(class = "mono mb-oid", row$id), shiny::tags$span(class = "mb-otitle", title),
+      shiny::tags$span(class = "mono mb-oscore", if (failing && !is.na(row$gate_score)) row$gate_score)
     )
   }))
 }

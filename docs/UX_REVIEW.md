@@ -3,6 +3,11 @@
 **Date:** 2026-11-05 · **Branch:** `phase-7-chat-exports` (202390c) · **Sample:** Survey UAV
 **Method:** I read `HANDOFF_BEHAVIOUR_AND_STYLE.md`, `docs/USER_GUIDE.md`, `app/R/*.R`, `app/www/*.css|js` and the `mbdiagram` widget. Then I ran the app (`.claude/launch.json` → `modelbench`) and went through every workspace at 1920×1080, 1440×900, 1280×800, 1024×768 and 900×800.
 
+> **Status (2026-11-05, branch `ux-review-fixes`):** every item below has been worked
+> through. 0.1–0.5 were fixed on `ux-p0-fixes`; 0.6, §1, §2 and §4 on `ux-review-fixes`,
+> following the per-screen defaults in §3. Notes on choices made are under each section
+> heading marked *Done:*. A fresh review against the "done when" checks is still owed.
+
 This document is for the coding agent. Each item gives the **evidence**, the **cause** where I found one, and a **fix** with a done-when check. Priorities:
 
 - **P0:** broken or misleading. Fix first.
@@ -70,9 +75,16 @@ The highest-leverage change is **§1: make the shell a fixed-height app frame wi
 ### 0.6 Widget script is cached across changes (new, found while fixing 0.3–0.5)
 - **Evidence:** after `tools/install_widgets.R`, the browser kept running the old `mbdiagram.js`. The server sent the new file, but the URL (`mbdiagram-binding-0.0.0.9000/mbdiagram.js`) hadn't changed, so a normal reload didn't pick it up.
 - **Fix:** bump the `mbdiagram` package `Version` whenever the widget changes (the dependency URL includes it), or add a version stamp to the `script:` entry in `mbdiagram.yaml`. This is the same lesson as `asset_url()` in `app_ui.R`.
-- **Status:** open.
+- **Status:** Fixed. `mbdiagram` is now 0.1.3 and is bumped with every widget change.
 
 ## 1. Layout model (P1, structural)
+
+*Done:* the shell is a fixed frame (`.mb-frame`); each screen has one bar holding its
+workspace tabs and its own actions (§4.5), so the separate workspace tab row is gone.
+Side columns (`side_column()`) resize, hide to a rail and remember both; at ≤1100 px they
+become overlays opened from the rail or by a selection. The chat pushes the frame at
+≥1200 px and folds the left column below 1600 px. `mbdiagram` gained Fit/−/100%/+,
+wheel and key zoom, panning, and fills its box.
 
 ### 1.1 Make the shell an app frame, not a scrolling document
 - **Evidence:**
@@ -135,6 +147,13 @@ The highest-leverage change is **§1: make the shell a fixed-height app frame wi
 ---
 
 ## 2. Space versus usability, screen by screen
+
+*Done:* all 30 items. Choices worth knowing: 2.2 marks rows "pass", "fail", "n/a" and
+"blocks" in words; 2.8 turns heads 45°; 2.9 routes with JointJS's manhattan router round
+blocks and moves labels clear of blocks and each other, hiding them below 55% zoom;
+2.17 uses a splitter at every width rather than a toggle; 2.20 puts the AI questions
+under the Completeness tab; 2.27 groups rows under the changed item they start from,
+since one change can start from two items and share no prefix.
 
 ### Write › Draft
 - **2.1 (P1) Empty right column; crowded centre.** Before the gate passes, the Coach column holds one sentence and a button in about 25% of the width. Meanwhile the centre stacks text, metadata, parsed sentence, gate ledger, terms and actions, which pushes **Commit** below the fold at 900px tall.
@@ -269,6 +288,9 @@ The highest-leverage change is **§1: make the shell a fixed-height app frame wi
 ---
 
 ## 4. Cross-cutting polish (P2)
+
+*Done:* 4.1–4.5. For 4.6 there is still no shinytest2 suite; a browser sweep of all 15
+screens at 900×800, 1440×900 and 1920×1080 found no page-level horizontal scroll.
 
 - **4.1 The status strip dims during recalculation.** After "Show on diagram" the strip faded (Shiny's `.recalculating` opacity).
   - **Fix:** `#status_strip.recalculating { opacity: 1; }`, since it refreshes often and shouldn't flicker.

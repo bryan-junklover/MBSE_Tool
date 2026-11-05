@@ -7,7 +7,7 @@ mbdiagram <- function(data, width = "100%", height = NULL, elementId = NULL) {
   )
 }
 
-mbdiagramOutput <- function(outputId, width = "100%", height = "560px") {
+mbdiagramOutput <- function(outputId, width = "100%", height = "100%") {
   htmlwidgets::shinyWidgetOutput(outputId, "mbdiagram", width, height, package = "mbdiagram")
 }
 
@@ -16,7 +16,7 @@ renderMbdiagram <- function(expr, env = parent.frame(), quoted = FALSE) {
   htmlwidgets::shinyRenderWidget(expr, mbdiagramOutput, env, quoted = TRUE)
 }
 
-# Updates the live diagram without rebuilding it: set_tool, set_selection or auto_layout.
+# Updates the live diagram without rebuilding it: set_tool, set_selection, auto_layout, fit or set_current.
 mbdiagram_send <- function(session, output_id, type, payload = list()) {
   session$sendCustomMessage(paste0("mbdiagram-", session$ns(output_id)), list(type = type, payload = payload))
 }

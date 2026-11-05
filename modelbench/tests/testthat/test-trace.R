@@ -218,3 +218,10 @@ test_that("hand links may leave the rationale empty, and test cases link themsel
   write_verification_record(con, "SYS-021", case$id, "pass", "engineer", evidence_ref = "R1")
   expect_identical(requirement_evidence(con, "SYS-021")$result, "pass")
 })
+
+test_that("a requirement with no test cases has empty evidence, not an error", {
+  con <- local_built_sample()
+  evidence <- requirement_evidence(con, "STK-001")
+  expect_identical(nrow(evidence), 0L)
+  expect_true(all(c("result", "recorded_at", "stale") %in% names(evidence)))
+})

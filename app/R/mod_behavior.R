@@ -27,46 +27,81 @@ record_diagram_layout <- function(state, view_id, positions, kind, undoable) {
   if (undoable) state$commands(push_command(shiny::isolate(state$commands()), layout_command(view_id, before, layout_rows(con, view_id, positions$id), "layout")))
 }
 
-render_step_table <- function(steps, lifelines, interfaces, selected, ns) {
+# The step table holds what a row needs at a glance: kind, ends, label and timing. The
+# interface, field and guard are edited in the step inspector (UX review §2.17).
+render_step_table <- function(steps, lifelines, selected, ns) {
   lifeline_choices <- stats::setNames(lifelines$id, lifelines$name)
-  interface_choices <- stats::setNames(interfaces$id, interfaces$name)
   shiny::tags$div(class = "mb-table", shiny::tags$table(
     class = "mb-simple mb-seq-table",
-    shiny::tags$thead(shiny::tags$tr(lapply(c("", "Kind", "From", "To", "Interface", "Field", "Label", "Guard", "Timing (s)", ""), shiny::tags$th))),
+    shiny::tags$thead(shiny::tags$tr(lapply(c("", "Kind", "From → To", "Label", "Timing (s)", ""), shiny::tags$th))),
     shiny::tags$tbody(`data-reorder-input` = ns("reorder"), lapply(seq_len(nrow(steps)), function(i) {
       step <- steps[i, ]
       field <- function(name) change_js(ns("step_field"), list(id = step$id, field = name))
       is_message <- step$step_kind %in% c("message", "self")
       has_ends <- step$step_kind %in% c("message", "self", "note")
-      is_fragment <- step$step_kind %in% c("fragment_open", "fragment_else")
+      classes <- paste(if (step$review_state == "unreviewed") "mb-unreviewed", if (identical(step$id, selected)) "mb-row-selected", if (isTRUE(step$field_missing)) "mb-field-missing-row")
       shiny::tags$tr(
-        `data-row-id` = step$id, draggable = "true", class = paste(if (step$review_state == "unreviewed") "mb-unreviewed", if (identical(step$id, selected)) "mb-row-selected"),
+        `data-row-id` = step$id, draggable = "true", class = classes,
         onclick = sprintf("if (event.target.tagName === 'TD') { %s }", event_js(ns("select_step"), step$id)),
         shiny::tags$td(title = "Drag to reorder", "⋮⋮"),
         shiny::tags$td(select_tag(STEP_KINDS, step$step_kind, field("step_kind"), label = "Kind")),
-        shiny::tags$td(if (has_ends) select_tag(lifeline_choices, blank_of(step$from_lifeline_id), field("from_lifeline_id"), "—", label = "From")
-                       else if (step$step_kind == "fragment_open") select_tag(FRAGMENT_KINDS, blank_of(step$fragment_kind), field("fragment_kind"), label = "Fragment kind")),
-        shiny::tags$td(if (is_message) select_tag(lifeline_choices, blank_of(step$to_lifeline_id), field("to_lifeline_id"), "—", label = "To")),
-        shiny::tags$td(if (is_message) select_tag(interface_choices, blank_of(step$interface_id), field("interface_id"), "None", label = "Interface")),
-        shiny::tags$td(if (is_message) shiny::tags$input(type = "text", value = blank_of(step$field_name), class = if (step$field_missing) "mb-field-missing", `aria-label` = "Field", onchange = field("field_name"))),
-        shiny::tags$td(shiny::tags$input(type = "text", value = step$label, `aria-label` = "Label", onchange = field("label"))),
-        shiny::tags$td(if (is_message || is_fragment) shiny::tags$input(type = "text", value = blank_of(step$guard), `aria-label` = "Guard", onchange = field("guard"))),
-        shiny::tags$td(if (is_message) shiny::tags$input(type = "text", placeholder = "[value]", `aria-label` = "Timing in seconds", onchange = field("timing"),
+        shiny::tags$td(
+          class = "mb-ends",
+          if (has_ends) select_tag(lifeline_choices, blank_of(step$from_lifeline_id), field("from_lifeline_id"), "—", label = "From")
+          else if (step$step_kind == "fragment_open") select_tag(FRAGMENT_KINDS, blank_of(step$fragment_kind), field("fragment_kind"), label = "Fragment kind"),
+          if (step$step_kind == "message") shiny::tags$span(`aria-hidden` = "true", "→"),
+          if (step$step_kind == "message") select_tag(lifeline_choices, blank_of(step$to_lifeline_id), field("to_lifeline_id"), "—", label = "To")
+        ),
+        shiny::tags$td(shiny::tags$input(type = "text", value = step$label, `aria-label` = "Label", onchange = field("label")),
+                       if (isTRUE(step$field_missing)) shiny::tags$div(class = "mb-gap", style = "font-size:12px", sprintf("Field %s isn't on its interface", blank_of(step$field_name)))),
+        shiny::tags$td(if (is_message) shiny::tags$input(type = "text", placeholder = "[value]", `aria-label` = "Timing in seconds", onchange = field("timing"), class = "mb-timing",
                                                          value = switch(step$timing_state, set = format(step$timing_s, trim = TRUE), placeholder = "[value]", ""))),
-        shiny::tags$td(style = "white-space:nowrap",
-                       shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", `aria-label` = paste("Move up:", step$label), onclick = event_js(ns("move_step"), list(id = step$id, by = -1L)), "↑"),
-                       shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", `aria-label` = paste("Move down:", step$label), onclick = event_js(ns("move_step"), list(id = step$id, by = 1L)), "↓"),
-                       shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", `aria-label` = paste("Delete:", step$label), onclick = event_js(ns("delete_step"), step$id), "×"))
+        shiny::tags$td(shiny::tags$details(
+          class = "mb-menu mb-menu-end",
+          shiny::tags$summary(class = "mb-btn mb-btn-small", `aria-label` = paste("Step actions:", step$label), "⋯"),
+          shiny::tags$div(class = "mb-menu-list",
+                          shiny::tags$button(type = "button", class = "mb-btn", onclick = event_js(ns("move_step"), list(id = step$id, by = -1L)), "Move up"),
+                          shiny::tags$button(type = "button", class = "mb-btn", onclick = event_js(ns("move_step"), list(id = step$id, by = 1L)), "Move down"),
+                          confirm_button("Delete…", ns("delete_step"), step$id, "Delete this step?", sprintf("“%s” goes from the scenario. Undo brings it back.", step$label), confirm = "Delete step"))
+        ))
       )
     }))
   ))
 }
 
-render_consistency <- function(check, ns) {
+# Everything about one step, in the right-hand column.
+render_step_inspector <- function(step, lifelines, interfaces, ns) {
+  if (is.null(step) || nrow(step) != 1L) return(shiny::tags$p(class = "mb-caption", "Select a step in the diagram or the table to edit it."))
+  field <- function(name) change_js(ns("step_field"), list(id = step$id, field = name))
+  lifeline_choices <- stats::setNames(lifelines$id, lifelines$name)
+  is_message <- step$step_kind %in% c("message", "self")
   shiny::tags$section(
     class = "mb-inspector",
-    shiny::tags$div(class = "mb-head", shiny::tags$b("Consistency"), shiny::tags$span(class = "mono mb-caption", "code · every edit")),
-    shiny::tags$span(sprintf("%d of %d messages map to defined interfaces", check$mapped, check$total)),
+    shiny::tags$div(class = "mb-head", shiny::tags$b(names(STEP_KINDS)[match(step$step_kind, STEP_KINDS)]), shiny::tags$span(class = "mono mb-caption", step$id)),
+    if (step$review_state == "unreviewed") review_block(ns, "review_step", "step_note"),
+    labelled("Label", shiny::tags$input(type = "text", value = step$label, onchange = field("label"))),
+    labelled("Kind", select_tag(STEP_KINDS, step$step_kind, field("step_kind"))),
+    if (step$step_kind %in% c("message", "self", "note")) labelled("From", select_tag(lifeline_choices, blank_of(step$from_lifeline_id), field("from_lifeline_id"), "—")),
+    if (step$step_kind == "message") labelled("To", select_tag(lifeline_choices, blank_of(step$to_lifeline_id), field("to_lifeline_id"), "—")),
+    if (step$step_kind == "fragment_open") labelled("Fragment kind", select_tag(FRAGMENT_KINDS, blank_of(step$fragment_kind), field("fragment_kind"))),
+    if (is_message) labelled("Interface", select_tag(stats::setNames(interfaces$id, interfaces$name), blank_of(step$interface_id), field("interface_id"), "None")),
+    if (is_message) labelled("Field", shiny::tags$input(type = "text", value = blank_of(step$field_name), class = if (isTRUE(step$field_missing)) "mb-field-missing", onchange = field("field_name"))),
+    if (isTRUE(step$field_missing)) shiny::tags$span(class = "mb-gap", "That field isn't on the interface. The Consistency line offers to add it."),
+    if (is_message || step$step_kind %in% c("fragment_open", "fragment_else")) labelled("Guard", shiny::tags$input(type = "text", class = "mono", value = blank_of(step$guard), onchange = field("guard"))),
+    if (is_message) labelled("Timing (s)", shiny::tags$input(type = "text", placeholder = "[value]", onchange = field("timing"),
+                                                            value = switch(step$timing_state, set = format(step$timing_s, trim = TRUE), placeholder = "[value]", ""))),
+    shiny::tags$div(class = "mb-head",
+                    shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", onclick = event_js(ns("move_step"), list(id = step$id, by = -1L)), "Move up"),
+                    shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", onclick = event_js(ns("move_step"), list(id = step$id, by = 1L)), "Move down")),
+    danger_zone(confirm_button("Delete step…", ns("delete_step"), step$id, "Delete this step?", sprintf("“%s” goes from the scenario. Undo brings it back.", step$label), confirm = "Delete step"))
+  )
+}
+
+render_consistency <- function(check, ns) {
+  shiny::tags$section(
+    class = "mb-consistency",
+    shiny::tags$div(class = "mb-head", shiny::tags$b("Consistency"), shiny::tags$span(class = if (check$mapped < check$total) "mb-gap", sprintf("%d of %d messages map to defined interfaces", check$mapped, check$total)),
+                    shiny::tags$span(class = "mono mb-caption", "code · every edit")),
     lapply(check$problems, function(problem) {
       shiny::tags$div(class = "mb-head", shiny::tags$span(class = "mb-gap", problem$text),
                       if (problem$kind == "field") {
@@ -76,45 +111,43 @@ render_consistency <- function(check, ns) {
   )
 }
 
-mod_scenarios_ui <- function(id) {
+mod_scenarios_ui <- function(id, tabs = NULL) {
   ns <- shiny::NS(id)
-  shiny::tags$div(
-    class = "mb-body",
-    shiny::tags$aside(
-      class = "mb-left", style = "max-width:300px",
-      shiny::uiOutput(ns("list")),
+  shiny::tagList(
+    screen_bar(tabs, actions = shiny::tagList(
+      shiny::uiOutput(ns("sketch_status"), inline = TRUE),
       shiny::actionButton(ns("new"), "New scenario…", class = "mb-btn"),
-      shiny::tags$section(
-        class = "mb-sketch-panel", style = "margin-top:16px",
-        shiny::tags$div(class = "mb-head", shiny::tags$span(class = "mb-badge-ai", "AI"), shiny::tags$b("Sketch an unreviewed draft")),
-        shiny::textInput(ns("sketch_name"), "Name", width = "100%"),
-        shiny::textAreaInput(ns("sketch_text"), "What happens", rows = 3, width = "100%"),
-        shiny::selectInput(ns("sketch_view"), "As", c("Sequence" = "sequence", "Activity" = "activity"), width = "100%"),
-        shiny::actionButton(ns("sketch"), "Sketch", class = "mb-btn mb-btn-ai"),
-        shiny::uiOutput(ns("sketch_status"))
-      )
-    ),
-    shiny::tags$main(
-      class = "mb-main",
-      shiny::uiOutput(ns("header")),
-      shiny::conditionalPanel(
-        "output.view_kind == 'sequence'", ns = ns,
-        shiny::tags$div(class = "mb-head", style = "margin-bottom:8px",
-                        shiny::actionButton(ns("add_lifeline"), "Lifeline", class = "mb-btn mb-btn-small"),
-                        shiny::actionButton(ns("add_message"), "Message", class = "mb-btn mb-btn-small"),
-                        shiny::actionButton(ns("add_fragment"), "Fragment", class = "mb-btn mb-btn-small"),
-                        shiny::actionButton(ns("add_note"), "Note", class = "mb-btn mb-btn-small")),
-        shiny::uiOutput(ns("sequence"))
+      # The AI sketch has its own dialog, with room for a proper description (§2.18).
+      shiny::actionButton(ns("sketch_open"), "Sketch with AI…", class = "mb-btn mb-btn-ai"))),
+    shiny::tags$div(
+      class = "mb-body",
+      side_column("left", "scenarios.list", "Scenarios", width = 260, shiny::uiOutput(ns("list"))),
+      shiny::tags$main(
+        class = "mb-main",
+        shiny::uiOutput(ns("header")),
+        shiny::conditionalPanel(
+          "output.view_kind == 'sequence'", ns = ns, class = "mb-fill",
+          shiny::tags$div(class = "mb-head",
+                          shiny::actionButton(ns("add_lifeline"), "+ Lifeline", class = "mb-btn mb-btn-small"),
+                          shiny::actionButton(ns("add_message"), "+ Message", class = "mb-btn mb-btn-small"),
+                          shiny::actionButton(ns("add_fragment"), "+ Fragment", class = "mb-btn mb-btn-small"),
+                          shiny::actionButton(ns("add_note"), "+ Note", class = "mb-btn mb-btn-small"),
+                          shiny::tags$span(class = "mb-caption", "Drag the bar below the diagram to share the space with the steps.")),
+          # Diagram above, steps below, with a bar between them to share the height (§2.17).
+          shiny::tags$div(class = "mb-pane-top", shiny::uiOutput(ns("sequence"))),
+          shiny::tags$div(class = "mb-hsplit", `data-key` = "scenarios", role = "separator", `aria-orientation` = "horizontal", `aria-label` = "Resize the diagram and steps"),
+          shiny::tags$div(class = "mb-pane-bottom", shiny::uiOutput(ns("steps")))
+        ),
+        shiny::conditionalPanel(
+          "output.view_kind == 'activity'", ns = ns, class = "mb-fill",
+          shiny::tags$div(class = "mb-head",
+                          lapply(c("action", "decision", "initial", "final"), function(kind) shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", onclick = event_js(ns("add_node"), kind), paste("+", tools::toTitleCase(kind)))),
+                          shiny::actionButton(ns("auto_layout"), "Auto-layout", class = "mb-btn mb-btn-small"),
+                          shiny::tags$span(class = "mb-caption", "Drag between a node's handles to connect it.")),
+          shiny::tags$div(class = "mb-diagram", mbdiagramOutput(ns("activity")))
+        )
       ),
-      shiny::conditionalPanel(
-        "output.view_kind == 'activity'", ns = ns,
-        shiny::tags$div(class = "mb-head", style = "margin-bottom:8px",
-                        lapply(c("action", "decision", "initial", "final"), function(kind) shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", onclick = event_js(ns("add_node"), kind), tools::toTitleCase(kind))),
-                        shiny::actionButton(ns("auto_layout"), "Auto-layout", class = "mb-btn mb-btn-small"),
-                        shiny::tags$span(class = "mb-caption", "Drag between a node's handles to connect it.")),
-        shiny::tags$div(class = "mb-diagram", mbdiagramOutput(ns("activity"), height = "540px")),
-        shiny::uiOutput(ns("node_inspector"))
-      )
+      side_column("right", "scenarios.inspector", "Step", width = 340, auto = TRUE, shiny::uiOutput(ns("inspector")))
     )
   )
 }
@@ -182,7 +215,7 @@ mod_scenarios_server <- function(id, state) {
 
     shiny::observeEvent(input$new, {
       shiny::showModal(shiny::modalDialog(
-        title = "New scenario", shiny::textInput(ns("new_name"), "Name"), shiny::selectInput(ns("new_view"), "As", c("Sequence" = "sequence", "Activity" = "activity")),
+        title = "New scenario", shiny::textInput(ns("new_name"), "Name"), shiny::selectInput(ns("new_view"), "As", c("Sequence" = "sequence", "Activity" = "activity"), selectize = FALSE),
         footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("new_confirm"), "Create", class = "mb-btn mb-btn-primary"))
       ))
     })
@@ -202,24 +235,36 @@ mod_scenarios_server <- function(id, state) {
       if (is.null(row)) return(NULL)
       scenario_steps(con(), row$id)
     })
+    lifelines <- shiny::reactive({
+      db_dep(state, "behavior")
+      db_dep(state, "model")
+      row <- scenario()
+      if (is.null(row)) return(NULL)
+      scenario_lifelines(con(), row$id)
+    })
     output$sequence <- shiny::renderUI({
       row <- scenario()
       if (is.null(row) || view_kind() != "sequence") return(NULL)
-      lifelines <- scenario_lifelines(con(), row$id)
-      interfaces <- DBI::dbGetQuery(con(), "SELECT id, name FROM interface ORDER BY name")
-      chosen <- selected_step()
-      detail <- if (!is.null(chosen)) {
-        hit <- steps()[steps()$id == chosen, , drop = FALSE]
-        if (nrow(hit) == 1L && hit$review_state == "unreviewed") review_block(ns, "review_step", "step_note")
-      }
+      seqview(lifelines(), steps(), selected_step(), ns("select_step"))
+    })
+    output$steps <- shiny::renderUI({
+      row <- scenario()
+      if (is.null(row) || view_kind() != "sequence") return(NULL)
       shiny::tagList(
-        seqview(lifelines, steps(), chosen, ns("select_step")),
-        detail,
         render_consistency(scenario_consistency(con(), row$id), ns),
-        render_step_table(steps(), lifelines, interfaces, chosen, ns)
+        render_step_table(steps(), lifelines(), selected_step(), ns)
       )
     })
+    output$inspector <- shiny::renderUI({
+      if (view_kind() == "activity") return(node_inspector())
+      chosen <- selected_step()
+      all <- steps()
+      step <- if (is.null(chosen) || is.null(all)) NULL else all[all$id == chosen, , drop = FALSE]
+      interfaces <- DBI::dbGetQuery(con(), "SELECT id, name FROM interface ORDER BY name")
+      render_step_inspector(step, lifelines(), interfaces, ns)
+    })
     shiny::observeEvent(input$select_step, selected_step(input$select_step))
+    shiny::observe(reveal_column(session, "inspector", !is.null(selected_step()) || length(selected_item()$ids) > 0L))
     shiny::observeEvent(input$review_step, behavior_edit(state, review_entity(con(), "seq_step", selected_step(), input$review_step$note), "review"))
     shiny::observeEvent(input$step_field, behavior_edit(state, update_step_field(con(), input$step_field$id, input$step_field$field, input$step_field$value), "edit step"))
     shiny::observeEvent(input$add_field, behavior_edit(state, add_field_for_step(con(), input$add_field$interface, input$add_field$field), "add field"))
@@ -249,7 +294,7 @@ mod_scenarios_server <- function(id, state) {
       elements <- DBI::dbGetQuery(con(), "SELECT id, name FROM element WHERE kind IN ('component', 'external') ORDER BY name")
       elements <- elements[!elements$id %in% taken, , drop = FALSE]
       shiny::showModal(shiny::modalDialog(
-        title = "Add a lifeline", shiny::selectInput(ns("lifeline_element"), "Element", stats::setNames(elements$id, elements$name)),
+        title = "Add a lifeline", shiny::selectInput(ns("lifeline_element"), "Element", stats::setNames(elements$id, elements$name), selectize = FALSE),
         footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("lifeline_confirm"), "Add", class = "mb-btn mb-btn-primary"))
       ))
     })
@@ -275,6 +320,8 @@ mod_scenarios_server <- function(id, state) {
       view_id <- activity_view_id(scenario()$id)
       switch(
         event$type,
+        undo = run_command(state, undo_command, redraw),
+        redo = run_command(state, redo_command, redraw),
         select = selected_item(list(kind = event$kind, ids = as.character(unlist(event$ids)))),
         move = record_diagram_layout(state, view_id, data.frame(id = event$id, x = event$x, y = event$y), "act_node", TRUE),
         layout = {
@@ -290,7 +337,7 @@ mod_scenarios_server <- function(id, state) {
     shiny::observeEvent(input$auto_layout, mbdiagram_send(session, "activity", "auto_layout"))
     shiny::observeEvent(input$add_node, behavior_edit(state, add_act_node(con(), scenario()$id, input$add_node), "add node"))
 
-    output$node_inspector <- shiny::renderUI({
+    node_inspector <- shiny::reactive({
       db_dep(state, "behavior")
       item <- selected_item()
       if (length(item$ids) != 1L) return(shiny::tags$p(class = "mb-caption", "Select a node or edge to edit it."))
@@ -300,7 +347,8 @@ mod_scenarios_server <- function(id, state) {
         if (nrow(edge) == 0L) return(NULL)
         return(shiny::tags$section(class = "mb-inspector", shiny::tags$b("Edge"),
                                    shiny::tags$label("Guard", shiny::tags$input(type = "text", value = blank_of(edge$guard), onchange = field("guard"))),
-                                   shiny::tags$div(shiny::tags$button(type = "button", class = "mb-btn", onclick = event_js(ns("delete_item"), list(kind = "act_edge", id = item$ids)), "Delete edge"))))
+                                   danger_zone(confirm_button("Delete edge…", ns("delete_item"), list(kind = "act_edge", id = item$ids), "Delete this edge?",
+                                                              "The two nodes are no longer connected. Undo brings it back.", confirm = "Delete edge"))))
       }
       node <- activity_nodes(con(), scenario()$id)
       node <- node[node$id == item$ids, , drop = FALSE]
@@ -320,7 +368,8 @@ mod_scenarios_server <- function(id, state) {
                           shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", onclick = event_js(ns("remove_read"), list(id = node$id, owner = read$owner_id, property = read$property)), "Remove"))
         }),
         shiny::tags$label("Add what it reads", select_tag(stats::setNames(read_keys, sprintf("%s · %s", readable$element, readable$label)), "", change_js(ns("add_read"), list(id = node$id)), "Choose…")),
-        shiny::tags$div(shiny::tags$button(type = "button", class = "mb-btn", onclick = event_js(ns("delete_item"), list(kind = "act_node", id = node$id)), "Delete node"))
+        danger_zone(confirm_button("Delete node…", ns("delete_item"), list(kind = "act_node", id = node$id), "Delete this node?",
+                                   sprintf("“%s” and its edges go from the activity. Undo brings them back.", if (is.na(node$label)) node$node_kind else node$label), confirm = "Delete node"))
       )
     })
     shiny::observeEvent(input$item_field, {
@@ -354,18 +403,31 @@ mod_scenarios_server <- function(id, state) {
     # --- AI sketch ---
     sketch_task <- shiny::ExtendedTask$new(function(connection, description, name, kind) run_behavior_sketch_async(connection, description, name, kind))
     sketch_message <- shiny::reactiveVal(NULL)
+    sketch_kind <- shiny::reactiveVal("sequence")
+    shiny::observeEvent(input$sketch_open, {
+      shiny::showModal(shiny::modalDialog(
+        title = shiny::tagList(shiny::tags$span(class = "mb-badge-ai", "AI"), " Sketch an unreviewed draft"), size = "l",
+        shiny::tags$p(class = "mb-caption", "The AI drafts structure only. Every step comes in unreviewed, timings come in as [value], and anything the model doesn't have becomes a question in the Review queue."),
+        shiny::textInput(ns("sketch_name"), "Name", width = "100%"),
+        shiny::textAreaInput(ns("sketch_text"), "What happens, in your words", rows = 6, width = "100%"),
+        shiny::selectInput(ns("sketch_view"), "As", c("Sequence" = "sequence", "Activity" = "activity"), selectize = FALSE),
+        footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("sketch"), "Sketch", class = "mb-btn mb-btn-ai"))
+      ))
+    })
     shiny::observeEvent(input$sketch, {
       text <- trimws(input$sketch_text)
       name <- trimws(input$sketch_name)
       if (!nzchar(text) || !nzchar(name)) return(refusal_toast("A sketch needs a name and a description."))
+      shiny::removeModal()
       sketch_message(NULL)
+      sketch_kind(input$sketch_view)
       sketch_task$invoke(con(), text, name, input$sketch_view)
     })
     shiny::observeEvent(sketch_task$result(), {
       result <- sketch_task$result()
       if (isTRUE(result$ok) && !is.null(result$sketch)) {
         current(result$sketch$id)
-        view(input$sketch_view)
+        view(sketch_kind())
         n <- length(result$sketch$questions)
         sketch_message(if (n > 0L) sprintf("Drafted. %d question%s went to the Review queue: it needs something the model doesn't have.", n, if (n == 1L) "" else "s") else "Drafted. Every step needs your review.")
         invalidate_db(state, c("behavior", "model", "ai"))
@@ -375,7 +437,7 @@ mod_scenarios_server <- function(id, state) {
       }
     })
     output$sketch_status <- shiny::renderUI({
-      if (sketch_task$status() == "running") return(shiny::tags$span(class = "mb-caption", "Checking…"))
+      if (sketch_task$status() == "running") return(shiny::tags$span(class = "mb-caption", "Sketching…"))
       if (!is.null(sketch_message())) shiny::tags$span(class = "mb-caption", sketch_message())
     })
 
@@ -429,31 +491,61 @@ render_completeness <- function(pairs, ns) {
   )
 }
 
-mod_machines_ui <- function(id) {
+MACHINE_SIDE_TABS <- c("Inspector" = "inspector", "Completeness" = "completeness", "Checks" = "checks")
+
+# The left column picks and lists; the verification panels sit in tabs on the right, and
+# the simulator's controls run as one strip under the canvas (UX review §2.20, §2.21).
+mod_machines_ui <- function(id, tabs = NULL) {
   ns <- shiny::NS(id)
-  shiny::tags$div(
-    class = "mb-body",
-    shiny::tags$aside(
-      class = "mb-left", style = "max-width:340px;flex-basis:320px",
-      shiny::selectInput(ns("machine"), "State machine", choices = character(0), width = "100%"),
-      shiny::uiOutput(ns("completeness")),
-      shiny::uiOutput(ns("questions")),
-      shiny::uiOutput(ns("checks")),
-      shiny::uiOutput(ns("definitions"))
-    ),
-    shiny::tags$main(
-      class = "mb-main",
-      shiny::tags$div(class = "mb-head", style = "margin-bottom:8px",
-                      shiny::actionButton(ns("add_state"), "Add state", class = "mb-btn mb-btn-small"),
-                      shiny::actionButton(ns("auto_layout"), "Auto-layout", class = "mb-btn mb-btn-small"),
-                      shiny::tags$span(class = "mb-caption", "Drag between a state's handles to add a transition.")),
-      shiny::uiOutput(ns("runbar")),
-      shiny::tags$div(class = "mb-diagram", mbdiagramOutput(ns("diagram"), height = "480px")),
-      shiny::uiOutput(ns("fire")),
-      shiny::uiOutput(ns("trace")),
-      shiny::uiOutput(ns("inspector"))
+  side_panel <- function(value, ...) shiny::conditionalPanel(sprintf("output.side_tab == '%s'", value), ns = ns, class = "mb-side-panel", ...)
+  shiny::tagList(
+    screen_bar(tabs, actions = shiny::tagList(
+      shiny::actionButton(ns("add_state"), "Add state", class = "mb-btn"),
+      shiny::actionButton(ns("auto_layout"), "Auto-layout", class = "mb-btn"))),
+    shiny::tags$div(
+      class = "mb-body",
+      side_column("left", "machines.list", "State machine", width = 260,
+                  shiny::selectInput(ns("machine"), "State machine", choices = character(0), width = "100%", selectize = FALSE),
+                  shiny::uiOutput(ns("states")),
+                  shiny::uiOutput(ns("definitions"))),
+      shiny::tags$main(
+        class = "mb-main",
+        shiny::tags$span(class = "mb-caption", "Drag between a state's handles to add a transition. Click a state or transition to edit it."),
+        shiny::tags$div(class = "mb-diagram", mbdiagramOutput(ns("diagram"))),
+        shiny::tags$section(
+          class = "mb-sim", `aria-label` = "Simulator",
+          shiny::uiOutput(ns("runbar")),
+          shiny::uiOutput(ns("fire")),
+          shiny::tags$details(class = "mb-trace-fold", shiny::tags$summary(shiny::textOutput(ns("trace_title"), inline = TRUE)), shiny::uiOutput(ns("trace")))
+        )
+      ),
+      side_column("right", "machines.side", "Inspector", width = 360,
+                  shiny::uiOutput(ns("side_tabs")),
+                  side_panel("inspector", shiny::uiOutput(ns("inspector"))),
+                  side_panel("completeness", shiny::uiOutput(ns("completeness")), shiny::uiOutput(ns("questions"))),
+                  side_panel("checks", shiny::uiOutput(ns("checks"))))
     )
   )
+}
+
+# The script and expectation an assertion builder describes, as the JSON core stores.
+# `sets` are the values each event sets, as the Fire buttons use them.
+assertion_json <- function(machine, start, events_text, expect_state, within = "", sets = list()) {
+  events <- trimws(strsplit(if (is.null(events_text)) "" else events_text, ",", fixed = TRUE)[[1]])
+  events <- events[nzchar(events)]
+  if (length(events) == 0L) stop("Name at least one event to fire.", call. = FALSE)
+  unknown <- setdiff(events, machine$events$name)
+  if (length(unknown) > 0L) stop(sprintf("%s %s an event of this state machine.", paste(unknown, collapse = ", "), if (length(unknown) == 1L) "isn't" else "aren't"), call. = FALSE)
+  if (!start %in% machine$states$id || !expect_state %in% machine$states$id) stop("Choose a start state and an expected state.", call. = FALSE)
+  script <- c(list(list(start = start)), lapply(events, function(name) if (is.null(sets[[name]])) list(event = name) else list(event = name, set = sets[[name]])))
+  expect <- list(state = expect_state)
+  within <- trimws(if (is.null(within)) "" else within)
+  if (nzchar(within)) {
+    seconds <- suppressWarnings(as.numeric(within))
+    if (is.na(seconds) || seconds <= 0) stop("Within is a number of seconds.", call. = FALSE)
+    expect$within_s <- seconds
+  }
+  list(script = as.character(jsonlite::toJSON(script, auto_unbox = TRUE)), expect = as.character(jsonlite::toJSON(expect, auto_unbox = TRUE)))
 }
 
 # Set values an assertion script gives an event, so firing it by hand matches the check.
@@ -517,7 +609,9 @@ mod_machines_server <- function(id, state) {
     })
     shiny::observe({
       running <- sim()
-      if (!is.null(running)) mbdiagram_send(session, "diagram", "set_current", list(id = running$current))
+      if (is.null(running)) return()
+      last <- if (length(running$trace) > 0L) running$trace[[length(running$trace)]]$transition else NULL
+      mbdiagram_send(session, "diagram", "set_current", list(id = running$current, via = if (length(last) == 1L && !is.na(last)) last))
     })
 
     output$runbar <- shiny::renderUI({
@@ -560,11 +654,17 @@ mod_machines_server <- function(id, state) {
       m <- shiny::isolate(machine())
       valid <- if (is.na(running$current)) character(0) else sim_valid_events(m, running)
       defaults <- event_default_sets(con(), m$id)
-      shiny::tags$div(class = "mb-fire", role = "group", `aria-label` = "Fire an event", lapply(m$events$name, function(name) {
+      button <- function(name) {
         sets <- defaults[[name]]
         shiny::tags$button(type = "button", class = if (name %in% valid) "valid" else "muted", onclick = event_js(ns("fire_event"), name),
                            title = if (length(sets) > 0L) paste("Sets", paste(sprintf("%s = %s", names(sets), vapply(sets, function(v) tolower(format(v)), "")), collapse = ", ")), name)
-      }))
+      }
+      others <- setdiff(m$events$name, valid)
+      # Said in words as well as by the dark fill: which events can fire from here.
+      shiny::tags$div(class = "mb-fire-groups",
+                      shiny::tags$div(class = "mb-fire", role = "group", `aria-label` = "Can fire now", shiny::tags$span(class = "mb-label", "Can fire now"),
+                                      if (length(valid) == 0L) shiny::tags$span(class = "mb-caption", "nothing") else lapply(valid, button)),
+                      if (length(others) > 0L) shiny::tags$div(class = "mb-fire", role = "group", `aria-label` = "Ignored here", shiny::tags$span(class = "mb-label", "Ignored here"), lapply(others, button)))
     })
     shiny::observeEvent(input$fire_event, {
       m <- machine()
@@ -573,8 +673,51 @@ mod_machines_server <- function(id, state) {
     })
     output$trace <- shiny::renderUI({
       shiny::req(sim())
-      shiny::tagList(shiny::tags$div(class = "mb-label", "Trace"), render_trace(sim()$trace))
+      render_trace(sim()$trace)
     })
+    # Folded by default to leave the canvas its height; the count and last step stay in view.
+    output$trace_title <- shiny::renderText({
+      trace <- shiny::req(sim())$trace
+      if (length(trace) == 0L) return("Trace · nothing yet")
+      sprintf("Trace (%d) · last: %s", length(trace), trace[[length(trace)]]$note)
+    })
+
+    # --- Side tabs ---
+    side_tab <- shiny::reactiveVal("inspector")
+    output$side_tab <- shiny::reactive(side_tab())
+    shiny::outputOptions(output, "side_tab", suspendWhenHidden = FALSE)
+    output$side_tabs <- shiny::renderUI({
+      pairs <- unhandled_pairs(con(), shiny::req(sm_id()))
+      checks <- assertions()
+      failing <- sum(checks$live_result != "pass")
+      labels <- c(inspector = "Inspector", completeness = if (nrow(pairs) > 0L) sprintf("Completeness (%d)", nrow(pairs)) else "Completeness",
+                  checks = if (failing > 0L) sprintf("Checks (%d failing)", failing) else "Checks")
+      shiny::tags$div(role = "tablist", `aria-label` = "Panels", class = "mb-segmented mb-segmented-fill", lapply(names(labels), function(value) {
+        on <- tolower(as.character(identical(side_tab(), value)))
+        shiny::tags$button(type = "button", role = "tab", `aria-pressed` = on, `aria-selected` = on, onclick = event_js(ns("set_side_tab"), value), labels[[value]])
+      }))
+    })
+    shiny::observeEvent(input$set_side_tab, side_tab(input$set_side_tab))
+    output$states <- shiny::renderUI({
+      m <- machine()
+      on <- selected()$ids
+      shiny::tagList(shiny::tags$div(class = "mb-label", "States"),
+                     shiny::tags$div(class = "mb-tree", lapply(seq_len(nrow(m$states)), function(i) {
+                       row <- m$states[i, ]
+                       shiny::tags$button(type = "button", `aria-current` = if (row$id %in% on) "true", class = if (row$review_state == "unreviewed") "mb-sketch",
+                                          onclick = event_js(ns("pick_state"), row$id),
+                                          row$name, if (identical(row$id, m$initial_state_id)) shiny::tags$span(class = "mb-caption", " · start"),
+                                          if (identical(row$id, sim()$current)) shiny::tags$span(class = "mb-caption", " · current"))
+                     })))
+    })
+    shiny::observeEvent(input$pick_state, {
+      selected(list(kind = "element", ids = input$pick_state))
+      mbdiagram_send(session, "diagram", "set_selection", list(ids = list(input$pick_state)))
+    })
+    shiny::observeEvent(selected(), {
+      if (length(selected()$ids) > 0L) side_tab("inspector")
+      reveal_column(session, "inspector", length(selected()$ids) > 0L)
+    }, ignoreInit = TRUE)
 
     # --- Panels ---
     output$completeness <- shiny::renderUI({
@@ -595,20 +738,38 @@ mod_machines_server <- function(id, state) {
       for (id in assertions()$id) guarded_edit(run_assertion(con(), id))
       runs(runs() + 1L)
     })
+    # A small builder: start here, fire these, expect that. JSON stays available (§2.22).
     shiny::observeEvent(input$add_assertion, {
+      m <- machine()
       requirements <- DBI::dbGetQuery(con(), "SELECT id, coalesce(short_title, id) AS name FROM requirement WHERE status = 'committed' ORDER BY id")
+      states <- stats::setNames(m$states$id, m$states$name)
       shiny::showModal(shiny::modalDialog(
-        title = "Add an assertion",
+        title = "Add an assertion", size = "l",
         shiny::textInput(ns("assert_description"), "What it checks", width = "100%"),
-        shiny::selectInput(ns("assert_requirement"), "Requirement", c("None" = "", stats::setNames(requirements$id, sprintf("%s %s", requirements$id, requirements$name))), width = "100%"),
-        shiny::textAreaInput(ns("assert_script"), "Script (JSON)", rows = 3, width = "100%", value = '[{"start":""},{"event":""}]'),
-        shiny::textAreaInput(ns("assert_expect"), "Expected (JSON)", rows = 2, width = "100%", value = '{"state":""}'),
+        shiny::selectInput(ns("assert_requirement"), "Requirement", c("None" = "", stats::setNames(requirements$id, sprintf("%s %s", requirements$id, requirements$name))), width = "100%", selectize = FALSE),
+        shiny::tags$div(class = "mb-fields",
+                        shiny::selectInput(ns("assert_start"), "Start in", states, selected = m$initial_state_id, selectize = FALSE),
+                        shiny::textInput(ns("assert_events"), "Then fire, in order", placeholder = paste(utils::head(m$events$name, 3), collapse = ", ")),
+                        shiny::selectInput(ns("assert_state"), "Expect it in", states, selectize = FALSE),
+                        shiny::textInput(ns("assert_within"), "Within (s, optional)")),
+        shiny::tags$span(class = "mb-caption", sprintf("Events: %s. Each sets the same values as its Fire button.", paste(m$events$name, collapse = ", "))),
+        shiny::tags$details(class = "mb-fold",
+                            shiny::tags$summary("Edit as JSON"),
+                            shiny::checkboxInput(ns("assert_use_json"), "Use the JSON below instead of the builder"),
+                            shiny::textAreaInput(ns("assert_script"), "Script (JSON)", rows = 3, width = "100%", value = '[{"start":""},{"event":""}]'),
+                            shiny::textAreaInput(ns("assert_expect"), "Expected (JSON)", rows = 2, width = "100%", value = '{"state":""}')),
         footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("assert_confirm"), "Add", class = "mb-btn mb-btn-primary"))
       ))
     })
     shiny::observeEvent(input$assert_confirm, {
       requirement <- if (nzchar(input$assert_requirement)) input$assert_requirement else NA_character_
-      written <- behavior_edit(state, add_assertion(con(), sm_id(), requirement, input$assert_description, input$assert_script, input$assert_expect), "add assertion")
+      json <- if (isTRUE(input$assert_use_json)) {
+        list(script = input$assert_script, expect = input$assert_expect)
+      } else {
+        guarded_edit(assertion_json(machine(), input$assert_start, input$assert_events, input$assert_state, input$assert_within, event_default_sets(con(), sm_id())))
+      }
+      if (is.null(json)) return()
+      written <- behavior_edit(state, add_assertion(con(), sm_id(), requirement, input$assert_description, json$script, json$expect), "add assertion")
       if (!is.null(written)) shiny::removeModal()
     })
 
@@ -638,7 +799,7 @@ mod_machines_server <- function(id, state) {
     shiny::observeEvent(input$add_variable, {
       shiny::showModal(shiny::modalDialog(
         title = "Add a variable", shiny::textInput(ns("variable_name"), "Name"),
-        shiny::selectInput(ns("variable_type"), "Type", c("number", "bool")), shiny::textInput(ns("variable_value"), "Initial value"),
+        shiny::selectInput(ns("variable_type"), "Type", c("number", "bool"), selectize = FALSE), shiny::textInput(ns("variable_value"), "Initial value"),
         footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("variable_confirm"), "Add", class = "mb-btn mb-btn-primary"))
       ))
     })
@@ -659,8 +820,8 @@ mod_machines_server <- function(id, state) {
       pending(list(from = from))
       shiny::showModal(shiny::modalDialog(
         title = sprintf("New transition from %s", state_name(m, from)),
-        shiny::selectInput(ns("new_event"), "Event", stats::setNames(m$events$id, m$events$name), selected = event),
-        shiny::selectInput(ns("new_target"), "To", stats::setNames(m$states$id, m$states$name), selected = to),
+        shiny::selectInput(ns("new_event"), "Event", stats::setNames(m$events$id, m$events$name), selected = event, selectize = FALSE),
+        shiny::selectInput(ns("new_target"), "To", stats::setNames(m$states$id, m$states$name), selected = to, selectize = FALSE),
         footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("transition_confirm"), "Add transition", class = "mb-btn mb-btn-primary"))
       ))
     }
@@ -696,6 +857,8 @@ mod_machines_server <- function(id, state) {
       view_id <- machine_view_id(sm_id())
       switch(
         event$type,
+        undo = run_command(state, undo_command, redraw),
+        redo = run_command(state, redo_command, redraw),
         select = selected(list(kind = event$kind, ids = as.character(unlist(event$ids)))),
         move = record_diagram_layout(state, view_id, data.frame(id = event$id, x = event$x, y = event$y), "sm_state", TRUE),
         layout = {
@@ -742,7 +905,9 @@ mod_machines_server <- function(id, state) {
           shiny::tags$label("Hold (s)", shiny::tags$input(type = "text", placeholder = "[value]", class = if (row$hold_state == "placeholder") "mb-is-placeholder", onchange = field("hold"),
                                                           value = switch(row$hold_state, set = format(row$hold_s, trim = TRUE), placeholder = "[value]", ""))),
           shiny::tags$label("Priority", shiny::tags$input(type = "text", value = row$priority, onchange = field("priority"))),
-          shiny::tags$div(shiny::tags$button(type = "button", class = "mb-btn", onclick = event_js(ns("delete_transition"), row$id), "Delete transition"))
+          danger_zone(confirm_button("Delete transition…", ns("delete_transition"), row$id, "Delete this transition?",
+                                     sprintf("%s → %s on %s goes from the state machine. Undo brings it back.", state_name(m, row$from_state_id), state_name(m, row$to_state_id),
+                                             m$events$name[match(row$event_id, m$events$id)]), confirm = "Delete transition"))
         ))
       }
       row <- m$states[m$states$id == item$ids, , drop = FALSE]
@@ -761,9 +926,12 @@ mod_machines_server <- function(id, state) {
           on <- any(m$scope$event_id == event$id & m$scope$state_id == row$id)
           shiny::tags$label(style = "display:block", shiny::tags$input(type = "checkbox", checked = if (on) NA, onchange = sprintf("Shiny.setInputValue('%s', {state: '%s', event: '%s', on: this.checked, n: Math.random()}, {priority: 'event'})", ns("scope"), row$id, event$id)), " ", event$name)
         }),
-        shiny::tags$div(class = "mb-head",
-                        if (!identical(row$id, m$initial_state_id)) shiny::tags$button(type = "button", class = "mb-btn", onclick = event_js(ns("make_start"), row$id), "Make start state"),
-                        shiny::tags$button(type = "button", class = "mb-btn", onclick = event_js(ns("delete_state"), row$id), "Delete state"))
+        if (!identical(row$id, m$initial_state_id)) shiny::tags$div(shiny::tags$button(type = "button", class = "mb-btn", onclick = event_js(ns("make_start"), row$id), "Make start state")),
+        danger_zone(confirm_button(sprintf("Delete %s…", row$name), ns("delete_state"), row$id, sprintf("Delete %s?", row$name),
+                                   sprintf("%s and the %d transition%s into or out of it go from the state machine. Undo brings them back.", row$name,
+                                           sum(m$transitions$from_state_id == row$id | m$transitions$to_state_id == row$id),
+                                           if (sum(m$transitions$from_state_id == row$id | m$transitions$to_state_id == row$id) == 1L) "" else "s"),
+                                   confirm = "Delete state"))
       )
     })
     shiny::observeEvent(input$transition_field, {
@@ -841,23 +1009,26 @@ mod_machines_server <- function(id, state) {
 
 # --- Behavioural impact ---
 
-mod_behavior_impact_ui <- function(id) {
+mod_behavior_impact_ui <- function(id, tabs = NULL) {
   ns <- shiny::NS(id)
+  pane <- function(which, label) {
+    shiny::tags$div(id = ns(paste0(which, "_pane")), class = "mb-compare-pane",
+                    shiny::tags$div(class = "mb-label", label), shiny::uiOutput(ns(paste0(which, "_sequence"))),
+                    shiny::conditionalPanel("output.is_activity", ns = ns, class = "mb-fill",
+                                            shiny::tags$div(class = "mb-diagram", mbdiagramOutput(ns(paste0(which, "_activity"))))))
+  }
   shiny::tagList(
-    shiny::tags$div(class = "mb-tabbar", shiny::selectInput(ns("card"), "Change", choices = character(0), width = "360px"), shiny::uiOutput(ns("sides"), inline = TRUE)),
+    screen_bar(tabs,
+               # The change name can be long, so the picker takes the room it needs (§2.23).
+               shiny::tags$div(class = "mb-grow", shiny::selectInput(ns("card"), "Change", choices = character(0), width = "100%", selectize = FALSE)),
+               shiny::uiOutput(ns("sides"), inline = TRUE)),
     shiny::tags$div(
       class = "mb-body",
-      shiny::tags$aside(class = "mb-left", style = "max-width:340px;flex-basis:300px", shiny::uiOutput(ns("list"))),
+      side_column("left", "impact.list", "Scenarios", width = 280, shiny::uiOutput(ns("list"))),
       shiny::tags$main(
         class = "mb-main",
         shiny::uiOutput(ns("summary")),
-        shiny::tags$div(
-          class = "mb-compare",
-          shiny::tags$div(id = ns("before_pane"), shiny::tags$div(class = "mb-label", "Before"), shiny::uiOutput(ns("before_sequence")),
-                          shiny::conditionalPanel("output.is_activity", ns = ns, shiny::tags$div(class = "mb-diagram", mbdiagramOutput(ns("before_activity"), height = "620px")))),
-          shiny::tags$div(id = ns("after_pane"), shiny::tags$div(class = "mb-label", "After"), shiny::uiOutput(ns("after_sequence")),
-                          shiny::conditionalPanel("output.is_activity", ns = ns, shiny::tags$div(class = "mb-diagram", mbdiagramOutput(ns("after_activity"), height = "620px"))))
-        ),
+        shiny::tags$div(class = "mb-compare", pane("before", "Before"), pane("after", "After")),
         shiny::uiOutput(ns("pane_style"))
       )
     )
@@ -964,7 +1135,8 @@ mod_behavior_impact_server <- function(id, state) {
         one <- scenario()
         shiny::req(one, one$has_activity)
         data <- activity_diagram(con(), one$id, impact_callouts(one$inputs, which))
-        mbdiagram(c(data, list(selected = list(), tool = "select_only")))
+        # Before and After zoom and scroll together, and open on what changed (§0.4).
+        mbdiagram(c(data, list(selected = list(), tool = "select_only", sync = session$ns("impact"), focus = as.list(one$changed_nodes))))
       })
     }
     output$before_sequence <- sequence_side("before")

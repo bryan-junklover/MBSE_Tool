@@ -1,7 +1,10 @@
 # The sequence diagram as plain SVG (handoff §5.7). Rows go to the table beside it when
 # clicked; the drawing holds no state of its own.
 
-SEQ_COLUMN <- 170
+# Lifelines share the width they're given, never closer than SEQ_COLUMN px (UX review
+# §2.19). x positions are percentages of the drawing's width; shapes that need pixel
+# offsets sit in a nested <svg> placed at that percentage.
+SEQ_COLUMN <- 140
 SEQ_ROW <- 46
 SEQ_TOP <- 62
 
@@ -20,11 +23,16 @@ seq_colours <- function(step, highlighted) {
   list(line = "var(--ink-2)", text = "var(--ink)", dash = NA)
 }
 
+pct <- function(x) sprintf("%.4f%%", x)
+
+# Draws its children at a percentage across, in pixels from there.
+at_x <- function(x, ...) htmltools::tag("svg", list(x = pct(x), overflow = "visible", ...))
+
 seq_arrow <- function(x1, x2, y, colours, width) {
   head <- if (x2 >= x1) -1 else 1
   svg_tag("g",
-          svg_tag("line", x1 = x1, y1 = y, x2 = x2, y2 = y, stroke = colours$line, `stroke-width` = width, `stroke-dasharray` = if (!is.na(colours$dash)) colours$dash),
-          svg_tag("path", d = sprintf("M %g %g L %g %g L %g %g z", x2, y, x2 + 8 * head, y - 4, x2 + 8 * head, y + 4), fill = colours$line))
+          svg_tag("line", x1 = pct(x1), y1 = y, x2 = pct(x2), y2 = y, stroke = colours$line, `stroke-width` = width, `stroke-dasharray` = if (!is.na(colours$dash)) colours$dash),
+          at_x(x2, svg_tag("path", d = sprintf("M 0 %g L %g %g L %g %g z", y, 8 * head, y - 4, 8 * head, y + 4), fill = colours$line)))
 }
 
 # Frames from fragment_open to fragment_close, innermost drawn last.
@@ -48,17 +56,17 @@ seq_frames <- function(steps) {
 seqview <- function(lifelines, steps, selected = NULL, input_id = NULL, highlighted = character(0)) {
   n <- nrow(lifelines)
   if (n == 0L) return(shiny::tags$p(class = "mb-caption", "No lifelines yet. Add one to start."))
-  x_of <- function(id) (match(id, lifelines$id) - 1L) * SEQ_COLUMN + SEQ_COLUMN / 2
+  centre <- function(i) (i - 0.5) / n * 100
+  x_of <- function(id) centre(match(id, lifelines$id))
   y_of <- function(i) SEQ_TOP + i * SEQ_ROW
-  width <- n * SEQ_COLUMN
   bottom <- y_of(nrow(steps) + 1L)
 
   heads <- lapply(seq_len(n), function(i) {
-    x <- (i - 1L) * SEQ_COLUMN + SEQ_COLUMN / 2
-    svg_tag("g",
-            svg_tag("rect", x = x - 72, y = 8, width = 144, height = 34, rx = 4, fill = "var(--surface)", stroke = "var(--line-strong)"),
-            svg_tag("text", x = x, y = 30, `text-anchor` = "middle", `font-size` = 12, `font-weight` = 600, fill = "var(--ink)", lifelines$name[i]),
-            svg_tag("line", x1 = x, y1 = 42, x2 = x, y2 = bottom, stroke = "var(--line-strong)", `stroke-dasharray` = "4 4"))
+    box <- max(120, nchar(lifelines$name[i]) * 7.2 + 20)
+    at_x(centre(i),
+         svg_tag("rect", x = -box / 2, y = 8, width = box, height = 34, rx = 4, fill = "var(--surface)", stroke = "var(--line-strong)"),
+         svg_tag("text", x = 0, y = 30, `text-anchor` = "middle", `font-size` = 12, `font-weight` = 600, fill = "var(--ink)", lifelines$name[i]),
+         svg_tag("line", x1 = 0, y1 = 42, x2 = 0, y2 = bottom, stroke = "var(--line-strong)", `stroke-dasharray` = "4 4"))
   })
   frames <- lapply(seq_frames(steps), function(frame) {
     top <- y_of(frame$start) - 24
@@ -66,7 +74,7 @@ seqview <- function(lifelines, steps, selected = NULL, input_id = NULL, highligh
     open <- steps[frame$start, ]
     tag_text <- sprintf("%s [%s]", open$fragment_kind, if (is.na(open$guard)) open$label else open$guard)
     htmltools::tag("g", c(seq_click(input_id, open$id, tag_text),
-      list(svg_tag("rect", x = inset, y = top, width = width - 2 * inset, height = y_of(frame$end) - top - 8, fill = "none", stroke = "var(--ink-2)"),
+      list(svg_tag("rect", x = inset, y = top, style = sprintf("width:calc(100%% - %dpx)", 2 * inset), height = y_of(frame$end) - top - 8, fill = "none", stroke = "var(--ink-2)"),
            svg_tag("text", x = inset + 6, y = top + 15, `font-size` = 11, `font-family` = "var(--font-mono)", fill = "var(--ink)", tag_text))))
   })
   rows <- lapply(seq_len(nrow(steps)), function(i) {
@@ -82,21 +90,23 @@ seqview <- function(lifelines, steps, selected = NULL, input_id = NULL, highligh
         x1 <- x_of(step$from_lifeline_id)
         x2 <- x_of(step$to_lifeline_id)
         list(seq_arrow(x1, x2, y, colours, weight),
-             svg_tag("text", x = (x1 + x2) / 2, y = y - 7, `text-anchor` = "middle", `font-size` = 12, `font-weight` = if (on) 600 else 400, fill = colours$text, label))
+             svg_tag("text", x = pct((x1 + x2) / 2), y = y - 7, `text-anchor` = "middle", `font-size` = 12, `font-weight` = if (on) 600 else 400, fill = colours$text, label))
       },
       self = {
         x <- x_of(step$from_lifeline_id)
-        list(svg_tag("path", d = sprintf("M %g %g h 34 v 16 h -28", x, y - 12), fill = "none", stroke = colours$line, `stroke-width` = weight),
-             svg_tag("path", d = sprintf("M %g %g l 8 -4 v 8 z", x, y + 4), fill = colours$line),
-             svg_tag("text", x = x + 40, y = y, `font-size` = 12, fill = colours$text, label))
+        list(at_x(x,
+                  svg_tag("path", d = sprintf("M 0 %g h 34 v 16 h -28", y - 12), fill = "none", stroke = colours$line, `stroke-width` = weight),
+                  svg_tag("path", d = sprintf("M 0 %g l 8 -4 v 8 z", y + 4), fill = colours$line),
+                  svg_tag("text", x = 40, y = y, `font-size` = 12, fill = colours$text, label)))
       },
       note = {
         x <- x_of(step$from_lifeline_id)
         box <- max(120, nchar(label) * 6.2 + 14)
-        list(svg_tag("rect", x = x - box / 2, y = y - 18, width = box, height = 26, fill = "var(--surface-muted)", stroke = if (on) "var(--ink)" else "var(--line-strong)"),
-             svg_tag("text", x = x, y = y, `text-anchor` = "middle", `font-size` = 12, fill = "var(--ink)", label))
+        list(at_x(x,
+                  svg_tag("rect", x = -box / 2, y = y - 18, width = box, height = 26, fill = "var(--surface-muted)", stroke = if (on) "var(--ink)" else "var(--line-strong)"),
+                  svg_tag("text", x = 0, y = y, `text-anchor` = "middle", `font-size` = 12, fill = "var(--ink)", label)))
       },
-      fragment_else = list(svg_tag("line", x1 = 6, y1 = y - 8, x2 = width - 6, y2 = y - 8, stroke = "var(--ink-2)", `stroke-dasharray` = "4 4"),
+      fragment_else = list(svg_tag("line", x1 = 6, y1 = y - 8, x2 = "99.4%", y2 = y - 8, stroke = "var(--ink-2)", `stroke-dasharray` = "4 4"),
                            svg_tag("text", x = 14, y = y + 6, `font-size` = 11, `font-family` = "var(--font-mono)", fill = "var(--ink)", sprintf("[%s]", if (is.na(step$guard)) step$label else step$guard))),
       NULL
     )
@@ -105,7 +115,8 @@ seqview <- function(lifelines, steps, selected = NULL, input_id = NULL, highligh
   })
   shiny::tags$div(
     class = "mb-seqview",
-    htmltools::tag("svg", list(viewBox = sprintf("0 0 %g %g", width, bottom + 12), width = width, height = bottom + 12, role = "img",
-                               `aria-label` = sprintf("Sequence diagram with %d steps", nrow(steps)), style = "display:block;font-family:var(--font-sans)", heads, frames, rows))
+    htmltools::tag("svg", list(width = "100%", height = bottom + 12, role = "img",
+                               `aria-label` = sprintf("Sequence diagram with %d steps", nrow(steps)),
+                               style = sprintf("display:block;min-width:%dpx;font-family:var(--font-sans)", n * SEQ_COLUMN), heads, frames, rows))
   )
 }

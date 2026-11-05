@@ -4,8 +4,20 @@
     {
       "name": "modelbench",
       "runtimeExecutable": "sh",
-      "runtimeArgs": ["-c", "MODELBENCH_WORKSPACE_DIR=/tmp/modelbench_preview Rscript -e 'shiny::runApp(\"app\", port = 7788, launch.browser = FALSE)'"],
+      "runtimeArgs": [
+        "-c",
+        "MODELBENCH_WORKSPACE_DIR=/tmp/modelbench_preview Rscript -e 'shiny::runApp(\"app\", port = 7788, launch.browser = FALSE)'"
+      ],
       "port": 7788
+    },
+    {
+      "name": "modelbench-ux",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "MODELBENCH_WORKSPACE_DIR=/tmp/modelbench_ux Rscript -e 'shiny::runApp(\"app\", port = 7799, launch.browser = FALSE)'"
+      ],
+      "port": 7799
     }
   ]
 }

@@ -39,3 +39,16 @@ test_that("with no blockers the banner reads Ready to baseline", {
   on.exit(DBI::dbDisconnect(con))
   expect_match(html_of(render_health(model_health(con), "go")), "Ready to baseline", fixed = TRUE)
 })
+
+test_that("every count above zero links, with problems in amber and totals plain", {
+  state <- local_sample_state()
+  html <- html_of(render_health(model_health(shiny::isolate(state$con())), "go"))
+  expect_match(html, "Messages using a missing field</button>", fixed = TRUE)
+  expect_match(html, "Unhandled event/state pairs</button>", fixed = TRUE)
+  expect_match(html, '<button type="button" class="mb-linkish " onclick="[^"]*&quot;scenarios&quot;[^"]*">Scenarios</button>')
+  expect_identical(render_blocker_groups(model_health(shiny::isolate(state$con()))$blockers, "go")$attribs$class, "mb-banner-groups")
+  shiny::testServer(mod_health_server, args = list(state = state), {
+    session$setInputs(go = list(place = "machines"))
+    expect_identical(state$nav()$tab, "State machines")
+  })
+})

@@ -15,6 +15,22 @@ Projects live in **Project**. That's also where you choose AI providers, route e
 task to a model, set a daily spend cap, and turn on **Local only**, which keeps every
 call on your own machine.
 
+## Finding your way round a screen
+
+Each screen has one bar at the top: the workspace's tabs on the left, the screen's own
+actions on the right. Side columns can be widened by dragging their edge, and hidden with
+the small arrow on that edge; a hidden column leaves a narrow rail with its name, which
+brings it back. Widths and hidden columns are remembered. On a narrow window the columns
+open over the page from their rails instead, and Esc closes them.
+
+Diagrams open fitted to the canvas. The buttons at the bottom right fit the diagram, zoom
+out, show it at 100% and zoom in; on the canvas, `+`, `-`, `0` (fit) and `1` (100%) do the
+same, Ctrl or ⌘ with the scroll wheel zooms where the pointer is, and dragging empty
+canvas moves the view. ⌘Z and ⇧⌘Z (Ctrl on other systems) undo and redo while the canvas
+has focus. Edge labels hide when the diagram is too small to read them.
+
+Anything that deletes asks first, and says what goes with it.
+
 ## The five workspaces
 
 **Write** is for requirements.
@@ -31,8 +47,8 @@ call on your own machine.
 **Model** is for structure.
 
 - **Structure:** the block diagram. Drag between ports to connect them, double-click a
-  block to open it, and use the arrow keys to move between connected blocks. Roll-ups
-  such as mass and power appear beside budgets.
+  block to open it, and use the arrow keys to move between connected blocks. With nothing
+  selected, the inspector shows the level's roll-ups (mass, power, endurance) and open gaps.
 - **Flows** and **Functional:** the same model seen by flow type, and as functions
   allocated to components.
 - **Interfaces:** each interface's fields and where it's used. Export the interface
@@ -43,11 +59,15 @@ call on your own machine.
 
 **Behavior** is for what the system does.
 
-- **Scenarios:** sequence diagrams edited as a table of steps (drag rows to reorder),
-  and activity diagrams. Amber means a step names a field its interface doesn't have.
+- **Scenarios:** sequence diagrams edited as a table of steps (drag rows to reorder, or
+  use a row's ⋯ menu), with the interface, field and guard in the step inspector; drag
+  the bar under the diagram to share the height. **Sketch with AI…** drafts a new one.
+  Activity diagrams too. Amber means a step names a field its interface doesn't have.
   Dashed blue means an AI draft that needs your review.
-- **State machines:** edit states and transitions, then run the simulator. Choose
-  where to start, fire events, and watch the trace. Guards and effects use a small
+- **State machines:** edit states and transitions, then run the simulator under the
+  canvas. Choose where to start, fire events (those that can fire from here are listed
+  first), and open the trace. Completeness and Checks are tabs beside the inspector, and
+  **Add assertion…** builds a check from a start state, events and an expected state. Guards and effects use a small
   language: `gnss_valid == false`, `soc := soc - 5`, `prop(Power System.battery_capacity) > 4000`.
   The Completeness panel lists event/state pairs that need a transition, or an
   "ignore" with your note. Requirement checks run every assertion live.

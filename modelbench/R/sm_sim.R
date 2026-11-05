@@ -36,8 +36,8 @@ sim_start <- function(machine, start_state = NULL) {
   list(current = current, clock = 0, variables = initial_variables(machine), trace = list(), status = "ok", error = NA_character_)
 }
 
-sim_log <- function(sim, from, to, event, note, level = "normal") {
-  sim$trace[[length(sim$trace) + 1L]] <- list(t = sim$clock, from = from, to = to, event = event, note = note, level = level)
+sim_log <- function(sim, from, to, event, note, level = "normal", transition = NA_character_) {
+  sim$trace[[length(sim$trace) + 1L]] <- list(t = sim$clock, from = from, to = to, event = event, note = note, level = level, transition = transition)
   sim
 }
 
@@ -74,7 +74,7 @@ sim_fire <- function(machine, sim, event_name, set = list()) {
     sim$current <- top$to_state_id
     target <- machine$states[machine$states$id == top$to_state_id, , drop = FALSE]
     sim$variables <- apply_effect(target$entry_effect, sim$variables, machine$property)
-    sim_log(sim, here, target$name, event_name, sprintf("%s → %s on %s", here, target$name, event_name))
+    sim_log(sim, here, target$name, event_name, sprintf("%s → %s on %s", here, target$name, event_name), transition = top$id)
   }, modelbench_sim_error = function(e) sim_fail(sim, machine, event_name, conditionMessage(e)),
   modelbench_refused = function(e) sim_fail(sim, machine, event_name, conditionMessage(e)))
 }

@@ -3,18 +3,21 @@
 FIELD_TYPES <- c("float32", "float64", "int32", "uint32", "uint64", "bool", "enum", "string", "bytes")
 FLOW_TYPES <- c("Data" = "data", "Energy" = "energy", "Matter" = "matter")
 
-mod_interfaces_ui <- function(id) {
+mod_interfaces_ui <- function(id, tabs = NULL) {
   ns <- shiny::NS(id)
-  shiny::tags$div(
-    class = "mb-body",
-    shiny::tags$aside(class = "mb-left",
-                      shiny::textInput(ns("filter"), "Filter", placeholder = "Name"),
-                      shiny::uiOutput(ns("list")),
-                      shiny::tags$div(shiny::actionButton(ns("add"), "+ Interface", class = "mb-btn")),
-                      shiny::tags$div(class = "mb-label", style = "margin-top:16px", "Interface control document"),
-                      shiny::tags$div(class = "mb-head", export_button(ns("icd_html"), "ICD (HTML)"), export_button(ns("icd_pdf"), "ICD (PDF)"))),
-    shiny::tags$main(class = "mb-main", shiny::uiOutput(ns("form")), shiny::uiOutput(ns("fields"))),
-    shiny::tags$aside(class = "mb-right", shiny::uiOutput(ns("used")))
+  shiny::tagList(
+    screen_bar(tabs, actions = shiny::tagList(
+      shiny::tags$span(class = "mb-caption", "Interface control document"),
+      export_button(ns("icd_html"), "ICD (HTML)"), export_button(ns("icd_pdf"), "ICD (PDF)"),
+      shiny::actionButton(ns("add"), "+ Interface", class = "mb-btn mb-btn-primary mb-btn-compact"))),
+    shiny::tags$div(
+      class = "mb-body",
+      side_column("left", "interfaces.list", "Interfaces", width = 260,
+                  shiny::textInput(ns("filter"), "Filter", placeholder = "Name"),
+                  shiny::uiOutput(ns("list"))),
+      shiny::tags$main(class = "mb-main", shiny::uiOutput(ns("form")), shiny::uiOutput(ns("fields"))),
+      side_column("right", "interfaces.used", "Where used", width = 320, shiny::uiOutput(ns("used")))
+    )
   )
 }
 
@@ -97,8 +100,7 @@ mod_interfaces_server <- function(id, state) {
                         labelled("Flow type", select_tag(FLOW_TYPES, row$flow_type, change("flow_type"))),
                         labelled("Rate", shiny::tags$input(type = "text", value = rate, placeholder = "not set", onchange = change("rate"))),
                         labelled("Transport", shiny::tags$input(type = "text", value = text(row$transport), placeholder = "not set", onchange = change("transport")))),
-        labelled("Description", shiny::tags$input(type = "text", value = text(row$description), onchange = change("description"))),
-        shiny::tags$div(shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", onclick = event_js(ns("delete"), row$id), "Delete interface"))
+        labelled("Description", shiny::tags$input(type = "text", value = text(row$description), onchange = change("description")))
       )
     })
 
@@ -131,8 +133,10 @@ mod_interfaces_server <- function(id, state) {
                                                placeholder = "[min] … [max]", `aria-label` = "Range", onchange = cell("range"))),
               shiny::tags$td(shiny::tags$input(type = "text", class = "mb-table-input", value = if (is.na(field$notes)) "" else field$notes,
                                                `aria-label` = "Notes", onchange = cell("notes"))),
-              shiny::tags$td(shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", `aria-label` = paste("Remove field", field$name),
-                                                onclick = event_js(ns("delete_field"), field$id), "Remove"))
+              shiny::tags$td(confirm_button("Remove", ns("delete_field"), field$id, sprintf("Remove field %s?", field$name),
+                                            sprintf("%s loses its field %s. Messages that name it will show as missing.", row$name, field$name),
+                                            confirm = "Remove field", class = "mb-btn mb-btn-small") |>
+                               htmltools::tagAppendAttributes(`aria-label` = paste("Remove field", field$name)))
             )
           }))
         ))
@@ -141,7 +145,15 @@ mod_interfaces_server <- function(id, state) {
     output$used <- shiny::renderUI({
       row <- current()
       shiny::req(row)
-      render_where_used(interface_where_used(con(), row$id))
+      used <- interface_where_used(con(), row$id)
+      n <- nrow(used$ports)
+      consequence <- if (n == 0L) "No ports use it." else sprintf("%d port%s use%s it and will have no interface.", n, if (n == 1L) "" else "s", if (n == 1L) "s" else "")
+      shiny::tagList(
+        render_where_used(used),
+        danger_zone(confirm_button(sprintf("Delete %s…", row$name), ns("delete"), row$id, sprintf("Delete %s?", row$name),
+                                   paste(consequence, "Undo brings it back."),
+                                   confirm = "Delete interface"))
+      )
     })
 
     shiny::observeEvent(input$add, {

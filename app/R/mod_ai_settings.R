@@ -16,8 +16,20 @@ POLICY_ROWS <- list(
   c("Explanations", "Write freely", "Decisions; numbers come from code", "Numbers come from code, never the model")
 )
 
-mod_ai_settings_ui <- function(id) {
+# `part` is "ai" (providers, routing and policy) or "data" (data protection), each its own tab.
+mod_ai_settings_ui <- function(id, part = c("ai", "data")) {
   ns <- shiny::NS(id)
+  part <- match.arg(part)
+  if (part == "data") {
+    return(shiny::tags$section(class = "mb-panel",
+                               shiny::tags$b("Data protection"),
+                               shiny::checkboxInput(ns("local_only"), "Local only: route every task to the local provider, and block cloud calls", width = "100%"),
+                               shiny::textAreaInput(ns("redact"), "Redact before cloud calls (one term per line)", rows = 3, width = "100%"),
+                               shiny::tags$div(class = "mb-fields",
+                                               shiny::textInput(ns("spend_cap"), "Daily cloud spend cap, in US dollars", placeholder = "no cap"),
+                                               shiny::textInput(ns("coach_wait"), "Coach wait after typing stops, in milliseconds")),
+                               shiny::tags$span(class = "mb-caption", "Every prompt and response is logged to this project. That can't be turned off in this version.")))
+  }
   shiny::tagList(
     shiny::tags$section(class = "mb-panel", shiny::tags$b("AI providers"), shiny::uiOutput(ns("providers"))),
     shiny::tags$section(class = "mb-panel",
@@ -29,14 +41,7 @@ mod_ai_settings_ui <- function(id) {
                           class = "mb-simple",
                           shiny::tags$thead(shiny::tags$tr(lapply(c("Kind", "The AI may", "Always yours", "Enforced by"), shiny::tags$th))),
                           shiny::tags$tbody(lapply(POLICY_ROWS, function(row) shiny::tags$tr(lapply(row, shiny::tags$td))))
-                        ))),
-    shiny::tags$section(class = "mb-panel",
-                        shiny::tags$b("Data protection"),
-                        shiny::checkboxInput(ns("local_only"), "Local only: route every task to the local provider, and block cloud calls"),
-                        shiny::textAreaInput(ns("redact"), "Redact before cloud calls (one term per line)", rows = 2, width = "100%"),
-                        shiny::textInput(ns("spend_cap"), "Daily cloud spend cap, in US dollars", placeholder = "no cap"),
-                        shiny::textInput(ns("coach_wait"), "Coach wait after typing stops, in milliseconds"),
-                        shiny::tags$span(class = "mb-caption", "Every prompt and response is logged to this project. That can't be turned off in this version."))
+                        )))
   )
 }
 
@@ -147,7 +152,7 @@ mod_ai_settings_server <- function(id, state) {
       local <- rows[rows$is_local == 1L, , drop = FALSE]
       loaded <- if (nrow(local) > 0L) local_server_models(local$base_url[1])$models else character(0)
       shiny::tags$div(class = "mb-table", shiny::tags$table(
-        class = "mb-simple",
+        class = "mb-simple mb-routes",
         shiny::tags$thead(shiny::tags$tr(lapply(c("Task", "Runs", "Provider", "Model", "Fallback", "Fallback model", "Sends"), shiny::tags$th))),
         shiny::tags$tbody(lapply(seq_len(nrow(routes)), function(i) {
           route <- routes[i, ]

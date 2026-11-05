@@ -16,47 +16,45 @@ send_draft_js <- function(request_input, text_input) {
           request_input, text_input)
 }
 
-mod_write_ui <- function(id) {
+mod_write_ui <- function(id, tabs = NULL) {
   ns <- shiny::NS(id)
   shiny::tagList(
-    shiny::tags$div(
-      class = "mb-tabbar",
-      shiny::uiOutput(ns("mode")),
-      shiny::tags$div(class = "mb-actions",
-                      shiny::actionButton(ns("new"), "New requirement", class = "mb-btn"))
-    ),
+    screen_bar(tabs, shiny::uiOutput(ns("mode")),
+               actions = shiny::actionButton(ns("new"), "New requirement", class = "mb-btn")),
     shiny::tags$div(
       class = "mb-body",
-      shiny::tags$aside(class = "mb-left",
-                        shiny::tags$div(class = "mb-label", "Specification outline"),
-                        shiny::uiOutput(ns("outline")),
-                        shiny::uiOutput(ns("actors_note"))),
+      side_column("left", "write.outline", "Outline", width = 260,
+                  shiny::tags$div(class = "mb-label", "Specification outline"),
+                  shiny::uiOutput(ns("outline")),
+                  shiny::uiOutput(ns("actors_note"))),
       shiny::tags$main(
-        class = "mb-main",
+        class = "mb-main mb-draft-main",
         shiny::conditionalPanel(sprintf("output['%s'] == 'ears'", ns("mode_value")), mod_write_ears_ui(ns)),
         shiny::tags$div(class = "mb-draft",
                         shiny::textAreaInput(ns("text"), shiny::textOutput(ns("draft_label"), inline = TRUE), rows = 3, width = "100%")),
         shiny::tags$div(class = "mb-fields",
-                        shiny::selectInput(ns("parent"), "Parent", choices = with_blank(character(0), "None")),
-                        shiny::selectInput(ns("level"), "Level", choices = REQ_LEVELS),
-                        shiny::selectInput(ns("type"), "Type", choices = with_blank(REQ_TYPES)),
-                        shiny::selectInput(ns("verify"), "Verify by", choices = with_blank(VERIFY_METHODS)),
+                        shiny::selectInput(ns("parent"), "Parent", choices = with_blank(character(0), "None"), selectize = FALSE),
+                        shiny::selectInput(ns("level"), "Level", choices = REQ_LEVELS, selectize = FALSE),
+                        shiny::selectInput(ns("type"), "Type", choices = with_blank(REQ_TYPES), selectize = FALSE),
+                        shiny::selectInput(ns("verify"), "Verify by", choices = with_blank(VERIFY_METHODS), selectize = FALSE),
                         shiny::textInput(ns("title"), "Short title")),
         shiny::tags$section(class = "mb-panel",
                             shiny::tags$div(class = "mb-label", "Parsed sentence"),
                             shiny::uiOutput(ns("sentence"))),
-        shiny::uiOutput(ns("gate")),
         shiny::uiOutput(ns("terms")),
-        shiny::tags$div(style = "display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px",
+        # Commit stays in reach however long the page gets (UX review §2.1).
+        shiny::tags$div(class = "mb-sticky-actions",
                         shiny::actionButton(ns("commit"), "Commit to specification", class = "mb-btn mb-btn-primary", disabled = TRUE,
                                             onclick = send_draft_js(ns("commit_request"), ns("text"))),
                         shiny::actionButton(ns("save_draft"), "Save draft", class = "mb-btn",
                                             onclick = send_draft_js(ns("save_request"), ns("text"))),
                         shiny::uiOutput(ns("commit_note"), class = "mb-caption"))
       ),
-      shiny::tags$aside(class = "mb-right",
-                        shiny::uiOutput(ns("coach")),
-                        shiny::uiOutput(ns("scope_gaps")))
+      # The checks column: the gate (code, every edit), then the coach (AI).
+      side_column("right", "write.checks", "Checks", width = 380,
+                  shiny::uiOutput(ns("gate")),
+                  shiny::uiOutput(ns("coach")),
+                  shiny::uiOutput(ns("scope_gaps")))
     )
   )
 }
@@ -73,14 +71,14 @@ mod_write_ears_ui <- function(ns) {
     class = "mb-panel",
     shiny::tags$div(class = "mb-label", "EARS builder"),
     shiny::tags$div(class = "mb-fields",
-                    shiny::selectInput(ns("ears_pattern"), "Pattern", choices = EARS_PATTERNS),
+                    shiny::selectInput(ns("ears_pattern"), "Pattern", choices = EARS_PATTERNS, selectize = FALSE),
                     shiny::textInput(ns("ears_trigger"), "Trigger, state or condition"),
-                    shiny::selectInput(ns("ears_actor"), "Actor", choices = with_blank(character(0), "Choose an element"))),
+                    shiny::selectInput(ns("ears_actor"), "Actor", choices = with_blank(character(0), "Choose an element"), selectize = FALSE)),
     shiny::textInput(ns("ears_response"), "Response", width = "100%"),
     shiny::tags$div(class = "mb-fields",
-                    shiny::selectInput(ns("ears_bound"), "Bound", choices = c("within", "at least", "no more than", "no less than")),
+                    shiny::selectInput(ns("ears_bound"), "Bound", choices = c("within", "at least", "no more than", "no less than"), selectize = FALSE),
                     shiny::textInput(ns("ears_value"), "Value", placeholder = "[value]"),
-                    shiny::selectInput(ns("ears_unit"), "Unit", choices = with_blank(EARS_UNIT_CHOICES, "None"))),
+                    shiny::selectInput(ns("ears_unit"), "Unit", choices = with_blank(EARS_UNIT_CHOICES, "None"), selectize = FALSE)),
     shiny::tags$div(shiny::actionButton(ns("ears_use"), "Put the sentence in the draft", class = "mb-btn"))
   )
 }
@@ -382,15 +380,16 @@ mod_write_server <- function(id, state, debounce_ms = 50, coach_ms = NULL) {
       units <- with_blank(DBI::dbGetQuery(con(), "SELECT symbol FROM unit ORDER BY symbol")$symbol, "None")
       fields <- switch(
         action$action,
-        property = shiny::tagList(shiny::selectInput(ns("term_element"), "Property of", choices = with_blank(element_choices, "Choose an element")),
-                                  shiny::selectInput(ns("term_unit"), "Unit", choices = units)),
+        property = shiny::tagList(shiny::selectInput(ns("term_element"), "Property of", choices = with_blank(element_choices, "Choose an element"), selectize = FALSE),
+                                  shiny::selectInput(ns("term_unit"), "Unit", choices = units, selectize = FALSE)),
         field = {
           interfaces <- DBI::dbGetQuery(con(), "SELECT id, name FROM interface WHERE layer = 'physical' ORDER BY name")
-          shiny::tagList(shiny::selectInput(ns("term_interface"), "Field of", choices = with_blank(stats::setNames(interfaces$id, interfaces$name), "Choose an interface")),
-                         shiny::selectInput(ns("term_type"), "Type", choices = c("float32", "float64", "int32", "uint32", "uint64", "bool", "string")),
-                         shiny::selectInput(ns("term_unit"), "Unit", choices = units))
+          shiny::tagList(shiny::selectInput(ns("term_interface"), "Field of", choices = with_blank(stats::setNames(interfaces$id, interfaces$name), "Choose an interface"),
+                                            selectize = FALSE),
+                         shiny::selectInput(ns("term_type"), "Type", choices = c("float32", "float64", "int32", "uint32", "uint64", "bool", "string"), selectize = FALSE),
+                         shiny::selectInput(ns("term_unit"), "Unit", choices = units, selectize = FALSE))
         },
-        component = shiny::selectInput(ns("term_parent"), "Part of", choices = with_blank(element_choices, "Top level"))
+        component = shiny::selectInput(ns("term_parent"), "Part of", choices = with_blank(element_choices, "Top level"), selectize = FALSE)
       )
       shiny::showModal(shiny::modalDialog(
         title = sprintf("%s: %s", sub("…$", "", TERM_ACTION_LABELS[[action$action]]), action$term),
