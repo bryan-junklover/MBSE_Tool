@@ -24,9 +24,12 @@ render_trace_table <- function(rows, columns, cell_of, row_class, row_label, sel
   shiny::tags$div(class = "mb-table mb-matrix-wrap", shiny::tags$table(
     class = "mb-simple mb-matrix",
     shiny::tags$thead(shiny::tags$tr(
-      shiny::tags$th(class = "mb-matrix-corner", "Requirement"),
+      # Each turned name leans over the heads to its right, and sticky heads are opaque, so
+      # every head sits above the ones after it, and the corner above them all.
+      shiny::tags$th(class = "mb-matrix-corner", style = sprintf("z-index:%d", nrow(columns) + 4L), "Requirement"),
       lapply(seq_len(nrow(columns)), function(j) {
         shiny::tags$th(class = paste("mb-rot", if (isTRUE(columns$empty[j])) "mb-gap"), title = columns$name[j],
+                       style = sprintf("z-index:%d", nrow(columns) - j + 3L),
                        shiny::tags$div(shiny::tags$span(columns$name[j])))
       })
     )),

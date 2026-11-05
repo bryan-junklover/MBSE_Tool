@@ -13,6 +13,9 @@ HTMLWidgets.widget({
     // Zoom limits, the margin kept round the content, and the zoom below which edge
     // labels are hidden because they can no longer be read.
     var MIN_SCALE = 0.4, MAX_SCALE = 2, PAD = 40, LABEL_SCALE = 0.55;
+    // Fit stops here in editable behaviour views: below it state and action names are too
+    // small to read, so the view scrolls instead (UX re-review R3).
+    var BEHAVIOUR_FIT_FLOOR = 0.7;
 
     function portGroup(position) {
       return {
@@ -397,14 +400,17 @@ HTMLWidgets.widget({
       var availW = holder.clientWidth, availH = holder.clientHeight;
       if (box && availW && availH) {
         scale = Math.min(1, availW / (box.width + 2 * PAD), availH / (box.height + 2 * PAD));
-        scale = Math.max(MIN_SCALE, scale);
+        scale = Math.max(fitFloor(), scale);
       }
       fitted = true;
       frame(false);
       holder.scrollLeft = 0;
       holder.scrollTop = 0;
+      // At the floor the machine may not fit, so keep the running state in view.
+      if (data && data.current != null) reveal(data.current);
       if (userAsked) broadcast();
     }
+    function fitFloor() { return behaviourMode() && tool !== "select_only" ? BEHAVIOUR_FIT_FLOOR : MIN_SCALE; }
     // Zooms about a point in the view (the middle, by default), so what's there stays there.
     function zoomTo(next, ax, ay) {
       next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, next));
@@ -614,6 +620,20 @@ HTMLWidgets.widget({
       if (best && bestScore > 0 && best.indexOf("B:") !== 0) { select([best], "element"); reveal(best); }
     });
 
+    // A state machine has no reading order, so it lays out left to right and wraps into rows
+    // shaped like the view; Fit then lands near 70% rather than 40% (UX re-review R3).
+    // Structure and activities read top to bottom.
+    function layoutOptions() {
+      var o = { "elk.algorithm": "layered", "elk.direction": "DOWN", "elk.edgeRouting": "ORTHOGONAL", "elk.spacing.nodeNode": behaviourMode() ? "150" : "56", "elk.layered.spacing.nodeNodeBetweenLayers": behaviourMode() ? "120" : "96", "elk.spacing.edgeNode": "24", "elk.padding": "[top=48,left=120,bottom=48,right=120]", "elk.portConstraints": "FIXED_SIDE" };
+      if (data && data.mode === "state_machine" && holder.clientWidth > 0 && holder.clientHeight > 0) {
+        o["elk.direction"] = "RIGHT";
+        o["elk.spacing.nodeNode"] = "60";
+        o["elk.padding"] = "[top=48,left=48,bottom=48,right=48]";
+        o["elk.layered.wrapping.strategy"] = "MULTI_EDGE";
+        o["elk.aspectRatio"] = String(holder.clientWidth / holder.clientHeight);
+      }
+      return o;
+    }
     // Runs ELK layered with port sides. Pinned blocks keep their positions.
     function autoLayout(userAsked) {
       if (!data) return;
@@ -624,7 +644,7 @@ HTMLWidgets.widget({
       blocks.forEach(function (b) { known[b.id] = true; });
       var graphDef = {
         id: "root",
-        layoutOptions: { "elk.algorithm": "layered", "elk.direction": "DOWN", "elk.edgeRouting": "ORTHOGONAL", "elk.spacing.nodeNode": behaviourMode() ? "150" : "56", "elk.layered.spacing.nodeNodeBetweenLayers": behaviourMode() ? "120" : "96", "elk.spacing.edgeNode": "24", "elk.padding": "[top=48,left=120,bottom=48,right=120]", "elk.portConstraints": "FIXED_SIDE" },
+        layoutOptions: layoutOptions(),
         children: blocks.map(function (b) {
           var size = b.size();
           return { id: String(b.id), width: size.width, height: size.height, layoutOptions: { "elk.portConstraints": "FIXED_SIDE" },
@@ -725,7 +745,7 @@ HTMLWidgets.widget({
       }).observe(el);
     }
     window.mbdiagramDebug = window.mbdiagramDebug || {};
-    window.mbdiagramDebug[el.id] = { graph: graph, paper: paper, scale: function () { return scale; } };
+    window.mbdiagramDebug[el.id] = { graph: graph, paper: paper, scale: function () { return scale; }, layoutOptions: layoutOptions };
 
     return {
       renderValue: function (x) {

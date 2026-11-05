@@ -144,3 +144,14 @@ test_that("a jump back bar names where it came from", {
   expect_match(html, "From Review queue:", fixed = TRUE)
   expect_match(html, "Back to review queue", fixed = TRUE)
 })
+
+test_that("select rules never use the background shorthand, which wipes the dropdown arrow", {
+  css <- readLines(file.path(ROOT, "app", "www", "app.css"))
+  rules <- regmatches(css, regexec("^([^{]+)\\{(.*)\\}\\s*$", css))
+  offenders <- vapply(rules, function(m) {
+    if (length(m) < 3L) return(FALSE)
+    selector <- gsub("selectize|card-select|selected", "", m[2])
+    grepl("(^|[[:space:],.>])select\\b|form-select", selector) && grepl("(^|[;{[:space:]])background:", m[3])
+  }, logical(1))
+  expect_identical(css[offenders], character(0))
+})
