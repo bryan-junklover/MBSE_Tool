@@ -19,6 +19,31 @@ app_theme <- function() {
   )
 }
 
+# The installed and the loaded version of a package, when they differ. An R session that
+# loaded the diagram widget before it was reinstalled keeps the old version, and htmlwidgets
+# names the script URL after it, so the browser goes on running its cached old script.
+stale_package <- function(pkg) {
+  if (!isNamespaceLoaded(pkg)) return(NULL)
+  installed <- unname(read.dcf(file.path(find.package(pkg), "DESCRIPTION"), fields = "Version")[1, 1])
+  loaded <- getNamespaceVersion(pkg)[[1]]
+  if (identical(installed, loaded)) NULL else list(loaded = loaded, installed = installed)
+}
+
+# Attaches a package, first reloading it if this session holds an older version.
+use_current_package <- function(pkg) {
+  stale <- stale_package(pkg)
+  if (!is.null(stale)) {
+    message(sprintf("%s %s is loaded but %s is installed; reloading it.", pkg, stale$loaded, stale$installed))
+    if (paste0("package:", pkg) %in% search()) detach(paste0("package:", pkg), character.only = TRUE)
+    reloaded <- tryCatch({
+      unloadNamespace(pkg)
+      TRUE
+    }, error = function(e) FALSE)
+    if (!reloaded) stop(sprintf("%s %s is still loaded in this R session. Restart R, then run the app again.", pkg, stale$loaded), call. = FALSE)
+  }
+  library(pkg, character.only = TRUE)
+}
+
 phase_placeholder <- function(what, phase) {
   shiny::tags$div(class = "mb-placeholder", sprintf("%s arrives in Phase %d.", what, phase))
 }

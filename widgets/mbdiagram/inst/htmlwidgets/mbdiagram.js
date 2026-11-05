@@ -106,7 +106,7 @@ HTMLWidgets.widget({
     el.appendChild(style);
     var paper = new dia.Paper({
       el: mount, model: graph, width: 1200, height: 800, gridSize: 8, drawGrid: { name: "dot", args: { color: "#D4D5D8", scaleFactor: 2 } },
-      background: { color: CANVAS }, async: false, sorting: dia.Paper.sorting.NONE, cellViewNamespace: namespace,
+      background: { color: CANVAS }, async: false, sorting: dia.Paper.sorting.NONE, cellViewNamespace: namespace, labelsLayer: true,
       linkPinning: false, snapLinks: { radius: 16 }, markAvailable: false,
       defaultLink: function () { return newLink(); },
       validateConnection: function (a, ma, b, mb) { return !!mb && (a !== b || behaviourMode()); },
@@ -249,17 +249,155 @@ HTMLWidgets.widget({
         return Math.max(0, mates.indexOf(String(link.id)));
       };
       var n = Math.min(4, Math.max(lane(link.source(), s), lane(link.target(), t)));
-      link.router("manhattan", {
-        step: 8, padding: 16 + 8 * n, maximumLoops: 800, excludeTypes: ["mb.Band"],
+      link.unset("mbRoute", { silent: true });
+      link.router("mbCached", {
+        step: 8, padding: 16 + 8 * n, maximumLoops: 4000, excludeTypes: ["mb.Band"],
         startDirections: s ? [s] : ["top", "right", "bottom", "left"],
-        endDirections: t ? [t] : ["top", "right", "bottom", "left"]
+        endDirections: t ? [t] : ["top", "right", "bottom", "left"],
+        rev: ++routeRev
       });
     }
-    // Moves each edge label along its edge until it is clear of blocks and other labels.
+    // A routed link keeps the channel separateChannels() gave it until one of its ends moves;
+    // then (mid-drag, say) the manhattan router takes over again.
+    var routeRev = 0;
+    function anchorKey(view) {
+      var a = view.sourceAnchor, b = view.targetAnchor;
+      return a && b ? [a.x, a.y, b.x, b.y].map(Math.round).join(",") : "";
+    }
+    // When the router can't find a way round the blocks it falls back to one bend that cuts
+    // straight through them. Before that, try tighter padding, then any side to leave from.
+    var NO_ROUTE = {}, ALL_SIDES = ["top", "right", "bottom", "left"];
+    joint.routers.mbCached = function (vertices, args, view) {
+      var cached = view.model.get("mbRoute");
+      if (cached && cached.key === anchorKey(view)) return cached.points.map(function (p) { return { x: p.x, y: p.y }; });
+      var tries = [args.padding, 16, 8].filter(function (p, i, all) { return p <= args.padding && all.indexOf(p) === i; })
+        .map(function (p) { return { padding: p }; })
+        .concat([{ padding: 8, startDirections: ALL_SIDES, endDirections: ALL_SIDES }]);
+      for (var i = 0; i < tries.length; i++) {
+        var route = joint.routers.manhattan(vertices, Object.assign({}, args, tries[i], { fallbackRouter: function () { return NO_ROUTE; } }), view);
+        if (route !== NO_ROUTE) return route;
+      }
+      return joint.routers.orthogonal(vertices, {}, view);
+    };
+    function reroute(link) { link.router("mbCached", Object.assign({}, link.router().args, { rev: ++routeRev })); }
+    // The router spaces links out near their blocks only, so two links can still run down one
+    // channel further on. This slides each such run apart, 10 px a link, unless that would put
+    // it through a block.
+    function separateChannels() {
+      if (behaviourMode()) return;
+      var links = graph.getLinks().filter(function (l) { var r = l.router(); return r && r.name === "mbCached"; });
+      var routes = links.map(function (link) {
+        // A kept route may now cross a block that moved; one just routed is current.
+        if (link.get("mbRoute")) {
+          link.unset("mbRoute", { silent: true });
+          reroute(link);
+        }
+        var view = paper.findViewByModel(link);
+        return view && view.route ? view.route.map(function (p) { return { x: p.x, y: p.y }; }) : [];
+      });
+      // Every straight run of every link. A run that ends at a port can't move, but the others
+      // in its channel move off it.
+      var segs = [];
+      var full = links.map(function (link, i) {
+        var view = paper.findViewByModel(link);
+        return view && view.sourceAnchor && view.targetAnchor ? [view.sourceAnchor].concat(routes[i]).concat([view.targetAnchor]) : [];
+      });
+      full.forEach(function (pts, i) {
+        for (var k = 0; k + 1 < pts.length; k++) {
+          var a = pts[k], b = pts[k + 1], vertical = Math.abs(a.x - b.x) < 0.5;
+          if (!vertical && Math.abs(a.y - b.y) >= 0.5) continue;
+          segs.push({ link: i, k: k - 1, fixed: k === 0 || k === pts.length - 2, vertical: vertical, at: vertical ? a.x : a.y,
+                      lo: vertical ? Math.min(a.y, b.y) : Math.min(a.x, b.x), hi: vertical ? Math.max(a.y, b.y) : Math.max(a.x, b.x) });
+        }
+      });
+      var blocks = graph.getElements().filter(function (e) { return !(e instanceof Band); });
+      // Runs filed by direction and position, so each looks only at its neighbours.
+      var lanes = {};
+      var laneKey = function (vertical, at) { return (vertical ? "v" : "h") + Math.floor(at / 8); };
+      var file = function (seg) { (lanes[laneKey(seg.vertical, seg.at)] = lanes[laneKey(seg.vertical, seg.at)] || []).push(seg); };
+      var near = function (vertical, at, reach) {
+        var found = [];
+        for (var b = Math.floor((at - reach) / 8); b <= Math.floor((at + reach) / 8); b++) found = found.concat(lanes[(vertical ? "v" : "h") + b] || []);
+        return found;
+      };
+      segs.forEach(function (seg, n) { seg.n = n; file(seg); });
+      var grouped = {};
+      segs.forEach(function (seg, n) {
+        if (grouped[n]) return;
+        var group = [seg];
+        near(seg.vertical, seg.at, 4).forEach(function (other) {
+          var m = other.n;
+          if (m <= n || grouped[m] || Math.abs(other.at - seg.at) > 4) return;
+          if (group.some(function (g) { return g.link === other.link; })) return;
+          if (!group.some(function (g) { return Math.min(g.hi, other.hi) - Math.max(g.lo, other.lo) > 4; })) return;
+          group.push(other);
+          grouped[m] = true;
+        });
+        if (group.length < 2) return;
+        var fixed = group.filter(function (g) { return g.fixed; }), movable = group.filter(function (g) { return !g.fixed; });
+        movable.sort(function (a, b) { return String(links[a.link].id) < String(links[b.link].id) ? -1 : 1; });
+        var centre = fixed.length > 0 ? fixed[0].at : group.reduce(function (sum, g) { return sum + g.at; }, 0) / group.length;
+        movable.forEach(function (g, j) {
+          var pts = routes[g.link], link = links[g.link];
+          var ends = [link.source().id, link.target().id].map(String);
+          // Stay put when already clear; else the next free slot out from the channel.
+          var candidates = [g.at].concat(fixed.length === 0 ? [centre + (j - (movable.length - 1) / 2) * 10] : []);
+          for (var step = 1; step <= 6; step++) candidates.push(centre + step * 10, centre - step * 10);
+          var fits = function (c) {
+            var crowded = near(g.vertical, c, 9.5).some(function (o) {
+              return o !== g && o.link !== g.link && Math.abs(o.at - c) < 9.5 &&
+                     Math.min(o.hi, g.hi) - Math.max(o.lo, g.lo) > 4;
+            });
+            if (crowded) return false;
+            var a = Object.assign({}, pts[g.k]), b = Object.assign({}, pts[g.k + 1]);
+            if (g.vertical) { a.x = c; b.x = c; } else { a.y = c; b.y = c; }
+            var line = new joint.g.Line(a, b);
+            // A run lying on a block's edge counts as a hit: keep 8 px clear.
+            if (blocks.some(function (e) { return ends.indexOf(String(e.id)) < 0 && e.getBBox().inflate(8).intersectionWithLine(line); })) return false;
+            pts[g.k] = a;
+            pts[g.k + 1] = b;
+            return true;
+          };
+          for (var c = 0; c < candidates.length; c++) {
+            if (fits(candidates[c])) {
+              var old = lanes[laneKey(g.vertical, g.at)];
+              old.splice(old.indexOf(g), 1);
+              g.at = candidates[c];
+              file(g);
+              return;
+            }
+          }
+        });
+      });
+      links.forEach(function (link, i) {
+        var view = paper.findViewByModel(link);
+        if (!view || routes[i].length === 0) return;
+        link.set("mbRoute", { key: anchorKey(view), points: routes[i] }, { silent: true });
+        reroute(link);
+      });
+    }
+    // Moves each edge label along its edge to the spot clear of blocks, other labels and other
+    // links' lines, or, failing that, the one with the least in the way.
     function placeLabels() {
       var boxes = graph.getElements().filter(function (e) { return !(e instanceof Band); }).map(function (e) { return e.getBBox().inflate(4); });
+      // Every link's straight runs, filed in a 64 px grid so a label only checks the runs near it.
+      var CELL = 64, grid = {};
+      var cellsOf = function (box, visit) {
+        for (var cx = Math.floor(box.x / CELL); cx <= Math.floor((box.x + box.width) / CELL); cx++) {
+          for (var cy = Math.floor(box.y / CELL); cy <= Math.floor((box.y + box.height) / CELL); cy++) visit(cx + ":" + cy);
+        }
+      };
+      graph.getLinks().forEach(function (link) {
+        var view = paper.findViewByModel(link);
+        if (!view || !view.sourcePoint || !view.targetPoint) return;
+        var pts = [view.sourcePoint].concat(view.route || []).concat([view.targetPoint]);
+        pts.slice(1).forEach(function (p, i) {
+          var line = new joint.g.Line(pts[i], p), entry = { id: String(link.id), line: line };
+          cellsOf(line.bbox(), function (key) { (grid[key] = grid[key] || []).push(entry); });
+        });
+      });
       var taken = [];
-      var ratios = [0.5, 0.35, 0.65, 0.25, 0.75, 0.15, 0.85];
+      var ratios = [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8, 0.15, 0.85, 0.1, 0.9];
       graph.getLinks().forEach(function (link) {
         var label = link.labels()[0];
         if (!label) return;
@@ -267,17 +405,23 @@ HTMLWidgets.widget({
         if (!view || !view.getPointAtRatio) return;
         var w = String(label.attrs.text.text).length * 7.3 + 8, h = 18;
         var best = null;
-        for (var k = 0; k < ratios.length && !best; k++) {
+        for (var k = 0; k < ratios.length && !(best && best.cost === 0); k++) {
           var p = view.getPointAtRatio(ratios[k]);
           if (!p) continue;
           var box = new joint.g.Rect(p.x - w / 2, p.y - h / 2, w, h);
-          var clash = boxes.some(function (b) { return b.intersect(box); }) || taken.some(function (b) { return b.intersect(box); });
-          if (!clash) best = { ratio: ratios[k], box: box };
+          var cost = 10 * boxes.filter(function (b) { return b.intersect(box); }).length +
+                     5 * taken.filter(function (b) { return b.intersect(box); }).length;
+          var crossed = {};
+          cellsOf(box, function (key) {
+            (grid[key] || []).forEach(function (entry) {
+              if (entry.id === String(link.id) || crossed[entry.id]) return;
+              if (box.intersectionWithLine(entry.line) || box.containsPoint(entry.line.start)) crossed[entry.id] = true;
+            });
+          });
+          cost += Object.keys(crossed).length;
+          if (!best || cost < best.cost) best = { ratio: ratios[k], box: box, cost: cost };
         }
-        if (!best) {
-          var mid = view.getPointAtRatio(0.5) || { x: 0, y: 0 };
-          best = { ratio: 0.5, box: new joint.g.Rect(mid.x - w / 2, mid.y - h / 2, w, h) };
-        }
+        if (!best) return;
         taken.push(best.box);
         if (label.position == null || (label.position.distance || label.position) !== best.ratio) link.label(0, { position: { distance: best.ratio } });
       });
@@ -347,6 +491,7 @@ HTMLWidgets.widget({
       drawBand();
       links.forEach(routeLink);
       spreadParallel();
+      separateChannels();
       placeLabels();
       applySelection();
       // A new level or view opens fitted; an edit to the same one keeps the view still.
@@ -577,6 +722,7 @@ HTMLWidgets.widget({
       model.set("mbLast", { x: p.x, y: p.y }, { silent: true });
       if (before && before.x === p.x && before.y === p.y) return;
       spreadParallel();
+      separateChannels();
       placeLabels();
       frame(true);
       send("move", { id: id, x: p.x, y: p.y });
@@ -651,9 +797,11 @@ HTMLWidgets.widget({
 
     // A state machine has no reading order, so it lays out left to right and wraps into rows
     // shaped like the view; Fit then lands near 70% rather than 40% (UX re-review R3).
-    // Structure and activities read top to bottom.
+    // Structure and activities read top to bottom, since their ports sit on tops and bottoms.
+    // Layers sit closer than blocks in a layer: chains of blocks are what make a diagram tall,
+    // and wider gaps across give the routes room to keep apart.
     function layoutOptions() {
-      var o = { "elk.algorithm": "layered", "elk.direction": "DOWN", "elk.edgeRouting": "ORTHOGONAL", "elk.spacing.nodeNode": behaviourMode() ? "150" : "56", "elk.layered.spacing.nodeNodeBetweenLayers": behaviourMode() ? "120" : "96", "elk.spacing.edgeNode": "24", "elk.padding": "[top=48,left=120,bottom=48,right=120]", "elk.portConstraints": "FIXED_SIDE" };
+      var o = { "elk.algorithm": "layered", "elk.direction": "DOWN", "elk.edgeRouting": "ORTHOGONAL", "elk.spacing.nodeNode": behaviourMode() ? "150" : "80", "elk.layered.spacing.nodeNodeBetweenLayers": behaviourMode() ? "120" : "64", "elk.spacing.edgeNode": "24", "elk.padding": "[top=48,left=120,bottom=48,right=120]", "elk.portConstraints": "FIXED_SIDE" };
       if (data && data.mode === "state_machine" && holder.clientWidth > 0 && holder.clientHeight > 0) {
         o["elk.direction"] = "RIGHT";
         o["elk.spacing.nodeNode"] = "60";
@@ -718,6 +866,7 @@ HTMLWidgets.widget({
           drawBand();
           graph.getLinks().forEach(routeLink);
           spreadParallel();
+          separateChannels();
           placeLabels();
           fitAll(false);
           send("layout", { positions: positions, user: !!userAsked && moved > 0 });
@@ -774,7 +923,7 @@ HTMLWidgets.widget({
       }).observe(el);
     }
     window.mbdiagramDebug = window.mbdiagramDebug || {};
-    window.mbdiagramDebug[el.id] = { graph: graph, paper: paper, scale: function () { return scale; }, layoutOptions: layoutOptions };
+    window.mbdiagramDebug[el.id] = { graph: graph, paper: paper, scale: function () { return scale; }, layoutOptions: layoutOptions, separateChannels: separateChannels, placeLabels: placeLabels };
 
     return {
       renderValue: function (x) {

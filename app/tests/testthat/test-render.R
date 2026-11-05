@@ -157,3 +157,8 @@ test_that("select rules never use the background shorthand, which wipes the drop
   }, logical(1))
   expect_identical(css[offenders], character(0))
 })
+
+test_that("a widget reinstalled under a running session is noticed", {
+  expect_null(stale_package("mbdiagram"))
+  expect_null(stale_package("not.a.loaded.package"))
+})

@@ -18,6 +18,15 @@
         "MODELBENCH_WORKSPACE_DIR=/tmp/modelbench_ux Rscript -e 'shiny::runApp(\"app\", port = 7799, launch.browser = FALSE)'"
       ],
       "port": 7799
+    },
+    {
+      "name": "modelbench-user",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "MODELBENCH_WORKSPACE_DIR=/tmp/modelbench_user Rscript -e 'shiny::runApp(\"app\", port = 7801, launch.browser = FALSE)'"
+      ],
+      "port": 7801
     }
   ]
 }
