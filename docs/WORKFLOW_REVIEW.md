@@ -1,6 +1,6 @@
 # ModelBench workflow review
 
-**Date:** 2026-11-06 · **Reviewed:** `ux-review-fixes` @ efef5a0 · **Status:** the doc claims, C2, A1–A7, C1 and D2 are fixed; the rest is open.
+**Date:** 2026-11-06 · **Reviewed:** `ux-review-fixes` @ efef5a0 · **Status:** fixed so far: the doc claims; A1–A7; B1–B4 and B7–B9; C1 and C2; D2; G4. Partly fixed: B5 and C5. The rest is open.
 
 **Method**
 
@@ -97,7 +97,7 @@ as a raw id, and it's carried into baselines.
 
 ## B. Things that can be added but not changed or removed
 
-**B1 (P1) A requirement can't be deprecated or deleted.**
+**B1 (P1) A requirement can't be deprecated or deleted.** — **Fixed.** Specification has **Deprecate…** (with a reason) for committed requirements and **Delete draft…** for drafts. Both can be undone.
 - **Why:** `deprecated` exists in the schema, and every query filters it out, but nothing sets it.
   Nothing in the app deletes a requirement.
 - **Consequence:** a bad import, a duplicate or a blank draft (see G3) stays in the project for
@@ -105,16 +105,21 @@ as a raw id, and it's carried into baselines.
 - **Fix:** add **Deprecate** (with a reason) and **Delete draft** to the Specification inspector.
 
 **B2 (P1) A scenario can't be renamed or deleted, and a wrong AI sketch can only be cleared by
-endorsing it.**
+endorsing it.** — **Fixed.** **Edit scenario** has its name, description and **Delete scenario…**. An unreviewed sketch opens with **Discard sketch…**.
 - **Why:** an unreviewed scenario blocks the baseline, and the only action on it is "Review, with
   my note".
 - **Fix:** add rename, edit description and delete, plus **Discard sketch** on an unreviewed one.
 
-**B3 (P1) A lifeline can't be removed.** Together with A1, this means a component used in any
+**B3 (P1) A lifeline can't be removed.** — **Fixed.** Each lifeline has **Remove**, which takes its messages. **+ Lifeline** says so when nothing is left to add (G4). Together with A1, this means a component used in any
 scenario can never be deleted.
 - **Fix:** add **Remove lifeline**, which takes its steps.
 
-**B4 (P2) A state machine's definition can only grow.**
+**B4 (P2) A state machine's definition can only grow.** — **Fixed**, except changing a machine's owner.
+- The machine can be renamed and deleted.
+- Events can be renamed, tied to an interface field, and removed.
+- Variables have an editable initial value and unit, and can be removed.
+- **Ignored on purpose** lists ignores, with **Check again**.
+- Renaming or removing an event an assertion fires, or removing a variable a guard or effect uses, is refused, naming what uses it. A variable can't be renamed.
 - **Machines:** no rename, change of owner or delete.
 - **Events and variables:** no rename, delete or type change, and a variable's unit can't be set.
 - **Event bindings:** an event can't be tied to an interface field, although the schema, Where
@@ -123,7 +128,7 @@ scenario can never be deleted.
 - **Fix:** turn Events and variables into an editable table. Add rename and delete for the
   machine, and a list of ignores.
 
-**B5 (P2) Assertions can't be edited or deleted.**
+**B5 (P2) Assertions can't be edited or deleted.** — **Partly fixed.** An assertion can be deleted, with its runs and link. To change one, delete it and add it again. The duplicate `requirement_id` column is still there.
 - Their `requirement_id` duplicates the `verified_by` link, and it blocks deleting the
   requirement even after that link is removed.
 - **Fix:** add edit and delete, and take the requirement from the link.
@@ -131,19 +136,28 @@ scenario can never be deleted.
 **B6 (P2) Test cases can't be renamed, unlinked or deleted.**
 - **Fix:** add these to the Verification panel. A delete either keeps or clears its records.
 
-**B7 (P2) A port can't be edited after it's created.**
+**B7 (P2) A port can't be edited after it's created.** — **Fixed.**
+- Each port row has its name, direction and interface.
+- A change is checked against the port's connectors, and refused, naming the connector, if one would no longer fit.
+- Ports are offered only interfaces of their own layer: physical for components, functional for functions.
 - **Consequence:** a port added with no interface stays a gate finding until it's deleted. That
   also loses its connectors and failure modes.
 - Changing a connected port's interface in the core isn't re-checked against its connectors.
 - **Fix:** add name, direction and interface controls, and re-run `check_connector` on change.
 
-**B8 (P2) A component can't be moved to another parent or ungrouped.** A grouping done in error,
+**B8 (P2) A component can't be moved to another parent or ungrouped.** — **Fixed.**
+- **Part of** moves a component under any other one that isn't inside it. Its connectors are re-checked.
+- **Ungroup…** moves the parts up a level and removes the group.
+- Both can be undone. A grouping done in error,
 once it's past Undo, can only be fixed by deleting and recreating. That's often blocked by A1, and
 when it works it loses the ids, links and failure modes.
 - **Fix:** add **Move to…**, which the cycle check already guards, and **Ungroup**.
 
 **B9 (P2) Property definitions can't be edited or deleted, and a property can't be removed from a
-component.**
+component.** — **Fixed.**
+- Each property on a component has **Remove**.
+- In Project, a property's label, roll-up and unit can be edited. The unit changes only within the same quantity, and a roll-up or unit a budget needs can't be removed.
+- An unused property can be deleted.
 - **Consequence:** a property on the wrong component becomes a permanent baseline blocker, unless
   someone invents a value for it. A property created without a roll-up can never have a budget.
 - **Fix:** add **Remove** beside each value. Allow edits to a definition's label and roll-up, and a
@@ -209,7 +223,7 @@ placeholder, a budget reads "0 / 2 kg" and passes. The "excludes N placeholder" 
 but only the documents show it.
 - **Fix:** show the note, and mark the budget incomplete rather than passing.
 
-**C5 (P2) "Handled" can rest on links that handle nothing.**
+**C5 (P2) "Handled" can rest on links that handle nothing.** — **Partly fixed.** Deprecated requirements no longer count as handling anything. Rule 6's verification check still accepts any link.
 - Rule 2 accepts any `handled_by` link, including one to a deprecated requirement or a transition
   in an unrelated machine.
 - Rule 6 accepts any `verified_by` link, even to a failing assertion or a test never run.

@@ -154,8 +154,31 @@ mod_spec_server <- function(id, state) {
                             aria_label(shiny::textAreaInput(ns("d_rationale"), NULL, value(row$rationale), rows = 3, width = "100%"), "textarea", "Rationale")),
         shiny::uiOutput(ns("findings")),
         shiny::uiOutput(ns("evidence")),
-        shiny::actionButton(ns("rewrite"), "Rewrite it in Write", class = "mb-btn")
+        shiny::actionButton(ns("rewrite"), "Rewrite it in Write", class = "mb-btn"),
+        danger_zone(if (row$status == "draft") {
+          confirm_button("Delete draft…", ns("delete_draft"), id, sprintf("Delete draft %s?", id),
+                         paste(delete_effects_text(shiny::isolate(delete_effects(con(), "requirement", id)))), confirm = "Delete draft")
+        } else {
+          shiny::actionButton(ns("deprecate"), "Deprecate…", class = "mb-btn")
+        })
       )
+    })
+    shiny::observeEvent(input$delete_draft, {
+      if (!is.null(model_edit(state, delete_draft_requirement(con(), input$delete_draft), "delete draft"))) selected(NULL)
+    })
+    shiny::observeEvent(input$deprecate, {
+      shiny::showModal(shiny::modalDialog(
+        title = sprintf("Deprecate %s?", selected()),
+        shiny::tags$p("It leaves the specification, the gate counts and Health. Baselines and history keep it, and Undo brings it back.",
+                      "Its links stay, but failure modes it handles are no longer counted as handled by it."),
+        shiny::textAreaInput(ns("deprecate_reason"), "Why", width = "100%", rows = 2, placeholder = "Superseded by SYS-031"),
+        footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("deprecate_confirm"), "Deprecate", class = "mb-btn mb-btn-primary"))
+      ))
+    })
+    shiny::observeEvent(input$deprecate_confirm, {
+      if (is.null(model_edit(state, deprecate_requirement(con(), selected(), input$deprecate_reason), "deprecate"))) return()
+      shiny::removeModal()
+      selected(NULL)
     })
     output$findings <- shiny::renderUI({
       row <- current()

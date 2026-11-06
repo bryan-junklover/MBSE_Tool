@@ -30,6 +30,95 @@ element_properties <- function(con, element_id) {
      WHERE v.owner_kind = 'element' AND v.owner_id = ? ORDER BY d.label", params = list(element_id))
 }
 
+# Components a component can move under: any other component except itself and the parts
+# inside it.
+move_targets <- function(con, element_id) {
+  rows <- DBI::dbGetQuery(con, "SELECT id, name, parent_id FROM element WHERE kind = 'component' ORDER BY sort_order, name")
+  inside <- element_id
+  repeat {
+    more <- setdiff(rows$id[rows$parent_id %in% inside], inside)
+    if (length(more) == 0L) break
+    inside <- c(inside, more)
+  }
+  rows[!rows$id %in% inside, c("id", "name"), drop = FALSE]
+}
+
+# Re-checks the connectors on every port of these elements, refusing with the first that
+# no longer fits.
+recheck_connectors <- function(con, element_ids) {
+  connectors <- DBI::dbGetQuery(con, sprintf("
+    SELECT DISTINCT c.id, c.source_port_id, c.target_port_id FROM connector c JOIN port p ON p.id IN (c.source_port_id, c.target_port_id)
+     WHERE p.element_id IN (%s)", paste(DBI::dbQuoteString(con, element_ids), collapse = ", ")))
+  for (i in seq_len(nrow(connectors))) {
+    check <- check_connector(con, connectors$source_port_id[i], connectors$target_port_id[i])
+    if (!check$ok) refuse(sprintf("Connector %s would no longer fit. %s", connectors$id[i], sub("^Can't connect: ", "", check$reason)))
+  }
+  invisible(TRUE)
+}
+
+# Moves a component under another one.
+move_element <- function(con, element_id, parent_id, author = "engineer") {
+  row <- read_entity(con, "element", element_id)
+  if (is.null(row) || row$kind != "component") refuse("Only a component can be moved.")
+  if (!parent_id %in% move_targets(con, element_id)$id) refuse("It can't go there: choose a component that isn't it or one of its own parts.")
+  if (identical(row$parent_id, parent_id)) return(NULL)
+  in_tx(con, {
+    written <- write_element(con, element_id, list(parent_id = parent_id), author, "Moved")
+    recheck_connectors(con, element_id)
+    written
+  })
+}
+
+# Removes a grouping: its parts move up to its parent, then the group goes, with its own
+# ports and connectors. Undo restores the group and puts the parts back.
+ungroup_element <- function(con, element_id, author = "engineer") {
+  row <- read_entity(con, "element", element_id)
+  if (is.null(row) || row$kind != "component") refuse("Only a component can be ungrouped.")
+  if (is.na(row$parent_id)) refuse(row$name, " is the whole system, so it can't be ungrouped.")
+  parts <- DBI::dbGetQuery(con, "SELECT id FROM element WHERE parent_id = ?", params = list(element_id))$id
+  if (length(parts) == 0L) refuse(row$name, " has no parts to ungroup.")
+  with_change_set(con, function(change_set) {
+    for (part in parts) write_element(con, part, list(parent_id = row$parent_id), author, sprintf("Ungrouped from %s", row$name), change_set)
+    delete_entity(con, "element", element_id, author, "Ungrouped", change_set)
+    recheck_connectors(con, parts)
+    list(change_set = change_set, id = element_id, area = "model")
+  })
+}
+
+# Changes a port's name, direction or interface. Its connectors are checked against the
+# change first, so a port can't be edited into a connection that no longer fits.
+save_port <- function(con, port_id, field, value, author = "engineer") {
+  port <- read_entity(con, "port", port_id)
+  if (is.null(port)) refuse("That port no longer exists.")
+  value <- if (is.null(value)) "" else trimws(value)
+  fields <- switch(field,
+    name = {
+      if (!nzchar(value)) refuse("A port needs a name.")
+      taken <- DBI::dbGetQuery(con, "SELECT 1 FROM port WHERE element_id = ? AND name = ? AND id <> ?", params = list(port$element_id, value, port_id))
+      if (nrow(taken) > 0L) refuse("This component already has a port called ", value, ".")
+      list(name = value)
+    },
+    direction = {
+      if (!value %in% c("in", "out", "inout")) refuse("A port's direction is in, out or inout.")
+      list(direction = value)
+    },
+    interface_id = {
+      if (nzchar(value) && is.null(read_entity(con, "interface", value))) refuse("That interface no longer exists.")
+      list(interface_id = if (nzchar(value)) value else NA_character_)
+    },
+    refuse("A port's ", field, " can't be changed here."))
+  connectors <- DBI::dbGetQuery(con, "SELECT id, source_port_id, target_port_id FROM connector WHERE source_port_id = ? OR target_port_id = ?",
+                                params = list(port_id, port_id))
+  in_tx(con, {
+    written <- write_port(con, port_id, fields, author, "Port edited")
+    for (i in seq_len(nrow(connectors))) {
+      check <- check_connector(con, connectors$source_port_id[i], connectors$target_port_id[i])
+      if (!check$ok) refuse(sprintf("Its connector %s would no longer fit. %s Remove the connector first.", connectors$id[i], sub("^Can't connect: ", "", check$reason)))
+    }
+    written
+  })
+}
+
 element_ports <- function(con, element_id) {
   DBI::dbGetQuery(con, "
     SELECT p.id, p.name, p.direction, p.side, p.interface_id, i.name AS interface,

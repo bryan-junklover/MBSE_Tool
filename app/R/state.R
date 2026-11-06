@@ -148,6 +148,8 @@ aria_label <- function(tag, element, label) {
 # but loses its link. A refusal says why instead, and the button is still offered so the
 # reason shows on the toast.
 DELETE_LABELS <- c(element = "part", port = "port", connector = "connector", seq_lifeline = "scenario lifeline", sm_transition = "transition",
+                   act_node = "activity step", act_edge = "activity flow", sm_event = "event", sm_variable = "variable", sm_state = "state",
+                   sm_assertion = "assertion", sm_event_scope = "must-handle tick", sm_ignore = "ignore",
                    seq_step = "scenario step", state_machine = "state machine", budget = "budget", failure_mode = "failure mode",
                    failure_waiver = "set-aside check", link = "link", property_value = "property value", interface_field = "field",
                    analysis_limit = "analysis limit")

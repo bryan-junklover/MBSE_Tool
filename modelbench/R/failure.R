@@ -154,6 +154,9 @@ failure_waivers <- function(con) DBI::dbGetQuery(con, "SELECT rule, subject_kind
 failure_findings <- function(con) {
   modes <- DBI::dbGetQuery(con, "SELECT id, subject_kind, subject_id, field_name, cause_kind, response_state FROM failure_mode")
   links <- DBI::dbGetQuery(con, "SELECT source_id, link_type, target_kind, target_id FROM link WHERE source_kind = 'failure_mode'")
+  # A deprecated requirement no longer handles anything.
+  retired <- DBI::dbGetQuery(con, "SELECT id FROM requirement WHERE status = 'deprecated'")$id
+  links <- links[!(links$target_kind == "requirement" & links$target_id %in% retired), , drop = FALSE]
   waivers <- failure_waivers(con)
   waived <- function(rule, kind, id) paste(rule, kind, id) %in% paste(waivers$rule, waivers$subject_kind, waivers$subject_id)
   covered <- function(causes, interface_id, port_id = NA_character_, field = NULL) {

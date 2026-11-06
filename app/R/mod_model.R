@@ -166,7 +166,16 @@ render_hosting <- function(hosting, ns) {
                  }))
 }
 
-render_element_inspector <- function(row, properties, ports, requirements, stereotypes, addable, pinned, ns, hosting = NULL, delete_text = NULL) {
+# Interfaces a port can take: physical ones for components and outside equipment,
+# functional ones for functions (review B11).
+port_interface_choices <- function(con, element_kind) {
+  layer <- if (identical(element_kind, "function")) "functional" else "physical"
+  rows <- DBI::dbGetQuery(con, "SELECT id, name FROM interface WHERE layer = ? ORDER BY name", params = list(layer))
+  stats::setNames(rows$id, rows$name)
+}
+
+render_element_inspector <- function(row, properties, ports, requirements, stereotypes, addable, pinned, ns, hosting = NULL, delete_text = NULL,
+                                     interfaces = character(0), parents = NULL) {
   text_or_blank <- function(x) if (is.na(x)) "" else x
   field <- function(name) change_js(ns("element_change"), list(field = name))
   unreviewed <- row$review_state == "unreviewed"
@@ -186,6 +195,7 @@ render_element_inspector <- function(row, properties, ports, requirements, stere
       )
     },
     labelled("Stereotype", select_tag(stereotypes, text_or_blank(row$stereotype_id), field("stereotype_id"), "None")),
+    if (!is.null(parents)) labelled("Part of", select_tag(parents, text_or_blank(row$parent_id), change_js(ns("move_to"), list()), label = "Part of")),
     labelled("Domain", select_tag(ELEMENT_DOMAINS, text_or_blank(row$domain), field("domain"), "Not set")),
     render_hosting(hosting, ns),
     labelled("Status", select_tag(ELEMENT_STATUSES, row$status, field("status"))),
@@ -193,14 +203,16 @@ render_element_inspector <- function(row, properties, ports, requirements, stere
     labelled("Description", shiny::tags$textarea(rows = 2, onchange = field("description"), text_or_blank(row$description))),
     shiny::tags$div(class = "mb-label", "Properties"),
     if (nrow(properties) > 0L) {
-      shiny::tags$div(class = "mb-prop-grid", unlist(lapply(seq_len(nrow(properties)), function(i) {
+      shiny::tags$div(class = "mb-prop-grid", style = "grid-template-columns: minmax(0,auto) minmax(0,1fr) auto auto", unlist(lapply(seq_len(nrow(properties)), function(i) {
         prop <- properties[i, ]
         is_placeholder <- prop$value_state == "placeholder"
         value <- if (is_placeholder) "" else if (!is.na(prop$num_value)) format(prop$num_value, trim = TRUE, digits = 15) else text_or_blank(prop$text_value)
         list(shiny::tags$span(prop$label),
              shiny::tags$input(type = "text", value = value, placeholder = "[value]", class = if (is_placeholder) "mb-is-placeholder",
                                `aria-label` = prop$label, onchange = change_js(ns("property_change"), list(id = prop$id))),
-             shiny::tags$span(class = "mb-unit", if (is.na(prop$unit)) "" else prop$unit))
+             shiny::tags$span(class = "mb-unit", if (is.na(prop$unit)) "" else prop$unit),
+             shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", `aria-label` = paste("Remove", prop$label, "from", row$name),
+                                onclick = event_js(ns("remove_property"), prop$id), "Remove"))
       }), recursive = FALSE))
     } else {
       shiny::tags$span(class = "mb-caption", "None recorded.")
@@ -211,9 +223,14 @@ render_element_inspector <- function(row, properties, ports, requirements, stere
       shiny::tags$div(class = "mb-prop-grid", style = "grid-template-columns: minmax(0,1fr) auto", unlist(lapply(seq_len(nrow(ports)), function(i) {
         port <- ports[i, ]
         no_iface <- is.na(port$interface)
-        list(shiny::tags$span(class = if (no_iface || !port$connected) "mb-gap",
-                              sprintf("%s · %s · %s%s", port$name, port$direction, if (no_iface) "no interface" else port$interface,
-                                      if (port$connected) "" else " · no connector")),
+        change <- function(field) change_js(ns("port_change"), list(id = port$id, field = field))
+        list(shiny::tags$div(
+               class = paste("mb-event-row", if (no_iface || !port$connected) "mb-gap"),
+               shiny::tags$input(type = "text", class = "mono", value = port$name, onchange = change("name"), `aria-label` = paste("Name of port", port$name)),
+               select_tag(c("in", "out", "inout"), port$direction, change("direction"), label = paste("Direction of port", port$name)),
+               select_tag(if (no_iface || port$interface_id %in% interfaces) interfaces else c(interfaces, stats::setNames(port$interface_id, port$interface)),
+                          if (no_iface) "" else port$interface_id, change("interface_id"), "No interface", label = paste("Interface of port", port$name)),
+               if (!port$connected) shiny::tags$span(style = "font-size:12px", "no connector")),
              confirm_button("Remove", ns("remove_port"), port$id, sprintf("Remove port %s?", port$name),
                             sprintf("%s loses its port %s%s.", row$name, port$name, if (port$connected) " and the connector on it" else ""),
                             confirm = "Remove port", class = "mb-btn mb-btn-small") |>
@@ -231,6 +248,11 @@ render_element_inspector <- function(row, properties, ports, requirements, stere
     shiny::tags$label(shiny::tags$input(type = "checkbox", checked = if (pinned) NA,
                                         onchange = sprintf("Shiny.setInputValue('%s', {on: this.checked, n: Math.random()}, {priority: 'event'})", ns("pin"))),
                       " Keep this position on auto-layout"),
+    if (isTRUE(attr(parents, "has_parts")) && !is.na(row$parent_id)) {
+      confirm_button(sprintf("Ungroup %s…", row$name), ns("ungroup"), row$id, sprintf("Ungroup %s?", row$name),
+                     sprintf("Its parts move up a level and %s goes, with its own ports and their connectors. Undo puts it all back.", row$name),
+                     confirm = "Ungroup", class = "mb-btn mb-btn-small")
+    },
     danger_zone(confirm_button(sprintf("Delete %s…", row$name), ns("delete_element"), row$id, sprintf("Delete %s?", row$name),
                                if (!is.null(delete_text)) delete_text else sprintf("It goes from the model with its %d port%s. Undo brings it back.", nrow(ports), if (nrow(ports) == 1L) "" else "s"),
                                confirm = "Delete from the model"))
@@ -467,7 +489,9 @@ mod_model_server <- function(id, state, mode = "structure") {
 
     ask_port <- function(element, side = NULL) {
       pending_port(list(element = element, side = side))
-      interfaces <- DBI::dbGetQuery(con(), "SELECT id, name FROM interface ORDER BY layer DESC, name")
+      kind <- DBI::dbGetQuery(con(), "SELECT kind FROM element WHERE id = ?", params = list(element))$kind
+      choices <- port_interface_choices(con(), kind)
+      interfaces <- data.frame(id = unname(choices), name = names(choices))
       shiny::showModal(shiny::modalDialog(
         title = "Add a port",
         shiny::textInput(ns("port_name"), "Name"),
@@ -537,7 +561,13 @@ mod_model_server <- function(id, state, mode = "structure") {
       }
       details <- render_element_inspector(row, properties, element_ports(con(), chosen$ids), element_requirements(con(), chosen$ids),
                                           stats::setNames(stereotypes$id, stereotypes$name), stats::setNames(addable$id, addable$label), pinned, ns, hosting,
-                                          delete_effects_text(delete_effects(con(), "element", row$id)))
+                                          delete_effects_text(delete_effects(con(), "element", row$id)),
+                                          interfaces = port_interface_choices(con(), row$kind),
+                                          parents = if (row$kind == "component" && !is.na(row$parent_id)) {
+                                            targets <- move_targets(con(), row$id)
+                                            structure(stats::setNames(targets$id, targets$name),
+                                                      has_parts = nrow(DBI::dbGetQuery(con(), "SELECT 1 FROM element WHERE parent_id = ?", params = list(row$id))) > 0L)
+                                          })
       if (row$kind != "function") return(details)
       db_dep(state, "spec")
       db_dep(state, "ai")
@@ -612,6 +642,21 @@ mod_model_server <- function(id, state, mode = "structure") {
       if (!is.null(written)) invalidate_db(state, "ai")
     })
     shiny::observeEvent(input$host, model_edit(state, host_software(con(), selected_id(), input$host$value), "runs on"))
+    shiny::observeEvent(input$move_to, {
+      # Redrawn either way: a refused move puts the select back.
+      model_edit(state, move_element(con(), selected_id(), input$move_to$value), "move")
+      redraw(redraw() + 1L)
+    })
+    shiny::observeEvent(input$ungroup, {
+      if (!is.null(model_edit(state, ungroup_element(con(), input$ungroup), "ungroup"))) {
+        selection(list(kind = "none", ids = character(0)))
+        redraw(redraw() + 1L)
+      }
+    })
+    shiny::observeEvent(input$remove_property, model_edit(state, delete_entity(con(), "property_value", input$remove_property), "remove property"))
+    shiny::observeEvent(input$port_change, {
+      if (is.null(model_edit(state, save_port(con(), input$port_change$id, input$port_change$field, input$port_change$value), "edit port"))) redraw(redraw() + 1L)
+    })
     shiny::observeEvent(input$realize, {
       model_edit(state, realize_flow(con(), input$realize$id, input$realize$value), "realise")
     })

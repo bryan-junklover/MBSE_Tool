@@ -6,6 +6,31 @@ FRAGMENT_KINDS <- c("alt" = "alt", "opt" = "opt", "loop" = "loop", "par" = "par"
 
 blank_of <- function(x) if (is.null(x) || length(x) == 0L || is.na(x)) "" else as.character(x)
 
+# Name, description and delete for a scenario, plus its lifelines with Remove. An AI sketch
+# that's wrong can be discarded rather than reviewed.
+render_scenario_admin <- function(row, lifelines, delete_text, ns) {
+  field <- function(name) change_js(ns("scenario_field"), list(field = name))
+  sketch <- row$review_state == "unreviewed"
+  shiny::tags$details(
+    class = "mb-fold", open = if (sketch) NA,
+    shiny::tags$summary(if (sketch) "Discard or edit this sketch" else "Edit scenario"),
+    shiny::tags$div(class = "mb-field-grid",
+                    labelled("Name", shiny::tags$input(type = "text", value = row$name, onchange = field("name"), `aria-label` = "Scenario name")),
+                    labelled("Description", shiny::tags$textarea(rows = 2, onchange = field("description"), `aria-label` = "Scenario description",
+                                                                 if (is.na(row$description)) "" else row$description))),
+    if (!is.null(lifelines) && nrow(lifelines) > 0L) {
+      shiny::tagList(shiny::tags$div(class = "mb-label", "Lifelines"),
+                     shiny::tags$div(style = "display:flex;flex-wrap:wrap;gap:6px", lapply(seq_len(nrow(lifelines)), function(i) {
+                       confirm_button(sprintf("Remove %s", lifelines$name[i]), ns("remove_lifeline"), lifelines$id[i], sprintf("Remove %s from the scenario?", lifelines$name[i]),
+                                      "Its messages go with it. Undo brings them back.", confirm = "Remove lifeline", class = "mb-btn mb-btn-small")
+                     })))
+    },
+    danger_zone(confirm_button(if (sketch) "Discard sketch…" else "Delete scenario…", ns("delete_scenario"), row$id,
+                               sprintf("%s %s?", if (sketch) "Discard" else "Delete", row$name), delete_text,
+                               confirm = if (sketch) "Discard sketch" else "Delete scenario"))
+  )
+}
+
 review_block <- function(ns, input_name, note_id) {
   shiny::tags$div(
     class = "mb-sketch-panel",
@@ -207,8 +232,27 @@ mod_scenarios_server <- function(id, state) {
                           shiny::tags$button(type = "button", `aria-pressed` = tolower(as.character(identical(view_kind(), kind))), onclick = event_js(ns("set_view"), kind), tools::toTitleCase(kind))
                         }))),
         if (!is.na(row$description)) shiny::tags$p(class = "mb-caption", row$description),
-        if (row$review_state == "unreviewed") review_block(ns, "review_scenario", "scenario_note")
+        if (row$review_state == "unreviewed") review_block(ns, "review_scenario", "scenario_note"),
+        render_scenario_admin(row, if (view_kind() == "sequence") lifelines() else NULL,
+                              delete_effects_text(delete_effects(con(), "scenario", row$id)), ns)
       )
+    })
+    shiny::observeEvent(input$scenario_field, {
+      change <- input$scenario_field
+      value <- trimws(change$value)
+      if (change$field == "name" && !nzchar(value)) return(refusal_toast("A scenario needs a name."))
+      behavior_edit(state, write_scenario(con(), scenario()$id, stats::setNames(list(if (nzchar(value)) value else NA_character_), change$field),
+                                          note = "Scenario edited"), "edit scenario")
+    })
+    shiny::observeEvent(input$delete_scenario, {
+      if (!is.null(behavior_edit(state, delete_entity(con(), "scenario", input$delete_scenario), "delete scenario"))) {
+        current(NULL)
+        selected_step(NULL)
+      }
+    })
+    shiny::observeEvent(input$remove_lifeline, {
+      written <- behavior_edit(state, delete_entity(con(), "seq_lifeline", input$remove_lifeline), "remove lifeline")
+      if (!is.null(written)) selected_step(NULL)
     })
     shiny::observeEvent(input$set_view, view(input$set_view))
     shiny::observeEvent(input$review_scenario, behavior_edit(state, review_entity(con(), "scenario", scenario()$id, input$review_scenario$note), "review"))
@@ -293,6 +337,7 @@ mod_scenarios_server <- function(id, state) {
       taken <- scenario_lifelines(con(), scenario()$id)$element_id
       elements <- DBI::dbGetQuery(con(), "SELECT id, name FROM element WHERE kind IN ('component', 'external') ORDER BY name")
       elements <- elements[!elements$id %in% taken, , drop = FALSE]
+      if (nrow(elements) == 0L) return(refusal_toast("Every component and outside equipment is already a lifeline here."))
       shiny::showModal(shiny::modalDialog(
         title = "Add a lifeline", shiny::selectInput(ns("lifeline_element"), "Element", stats::setNames(elements$id, elements$name), selectize = FALSE),
         footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("lifeline_confirm"), "Add", class = "mb-btn mb-btn-primary"))
@@ -454,6 +499,68 @@ render_trace <- function(trace) {
   }))
 }
 
+# The machine's name, its events (renamed, tied to an interface field, removed), variables
+# (initial value and unit), the event/state pairs ignored on purpose, and delete.
+render_machine_definitions <- function(m, interfaces, fields, units, delete_text, ns) {
+  text_or_blank <- function(x) if (is.null(x) || is.na(x)) "" else x
+  state_name <- function(id) m$states$name[match(id, m$states$id)]
+  event_name <- function(id) m$events$name[match(id, m$events$id)]
+  shiny::tags$section(
+    class = "mb-inspector",
+    labelled("Name", shiny::tags$input(type = "text", value = m$name, onchange = change_js(ns("machine_rename"), list()), `aria-label` = "State machine name")),
+    shiny::tags$div(class = "mb-label", "Events"),
+    if (nrow(m$events) == 0L) shiny::tags$span(class = "mb-caption", "No events yet."),
+    lapply(seq_len(nrow(m$events)), function(i) {
+      event <- m$events[i, ]
+      own <- fields$name[fields$interface_id %in% event$interface_id]
+      shiny::tags$div(
+        class = "mb-event-row",
+        shiny::tags$input(type = "text", class = "mono", value = event$name, `aria-label` = paste("Event name", event$name),
+                          onchange = change_js(ns("event_rename"), list(id = event$id))),
+        select_tag(stats::setNames(interfaces$id, interfaces$name), text_or_blank(event$interface_id), change_js(ns("event_bind"), list(id = event$id, field = "interface")),
+                   "No interface", label = paste("Interface that raises", event$name)),
+        if (!is.na(event$interface_id)) {
+          select_tag(stats::setNames(own, own), text_or_blank(event$field_name), change_js(ns("event_bind"), list(id = event$id, field = "field")),
+                     "Any field", label = paste("Field that raises", event$name))
+        },
+        confirm_button("Remove", ns("delete_event"), event$id, sprintf("Remove event %s?", event$name),
+                       "Its transitions, must-handle ticks and ignores go with it. Undo brings them back.", confirm = "Remove event", class = "mb-btn mb-btn-small")
+      )
+    }),
+    shiny::tags$div(class = "mb-label", "Variables"),
+    if (nrow(m$variables) == 0L) shiny::tags$span(class = "mb-caption", "No variables yet."),
+    lapply(seq_len(nrow(m$variables)), function(i) {
+      variable <- m$variables[i, ]
+      shiny::tags$div(
+        class = "mb-event-row",
+        shiny::tags$span(class = "mono", sprintf("%s (%s)", variable$name, variable$value_type)),
+        shiny::tags$input(type = "text", value = variable$initial_value, `aria-label` = paste("Initial value of", variable$name), style = "width:80px",
+                          onchange = change_js(ns("variable_change"), list(id = variable$id, field = "initial_value"))),
+        if (variable$value_type == "number") {
+          select_tag(stats::setNames(units, units), text_or_blank(variable$unit), change_js(ns("variable_change"), list(id = variable$id, field = "unit")), "No unit",
+                     label = paste("Unit of", variable$name))
+        },
+        confirm_button("Remove", ns("delete_variable"), variable$id, sprintf("Remove variable %s?", variable$name),
+                       "Undo brings it back. A variable a guard or effect uses can't be removed.", confirm = "Remove variable", class = "mb-btn mb-btn-small")
+      )
+    }),
+    shiny::tags$div(class = "mb-head",
+                    shiny::actionButton(ns("add_event"), "Add event…", class = "mb-btn mb-btn-small"),
+                    shiny::actionButton(ns("add_variable"), "Add variable…", class = "mb-btn mb-btn-small")),
+    if (nrow(m$ignores) > 0L) {
+      shiny::tagList(shiny::tags$div(class = "mb-label", "Ignored on purpose"),
+                     lapply(seq_len(nrow(m$ignores)), function(i) {
+                       row <- m$ignores[i, ]
+                       shiny::tags$div(class = "mb-prop-grid", style = "grid-template-columns: minmax(0,1fr) auto",
+                                       shiny::tags$span(style = "font-size:13px", sprintf("%s in %s: “%s”", event_name(row$event_id), state_name(row$state_id), row$rationale)),
+                                       shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", `aria-label` = sprintf("Stop ignoring %s in %s", event_name(row$event_id), state_name(row$state_id)),
+                                                          onclick = event_js(ns("delete_ignore"), paste(row$state_id, row$event_id, sep = "|")), "Check again"))
+                     }))
+    },
+    danger_zone(confirm_button("Delete state machine…", ns("delete_machine"), m$id, sprintf("Delete %s?", m$name), delete_text, confirm = "Delete state machine"))
+  )
+}
+
 render_checks <- function(rows, ns) {
   shiny::tags$section(
     class = "mb-inspector",
@@ -466,7 +573,10 @@ render_checks <- function(rows, ns) {
         shiny::tags$div(class = "mono", style = "font-size:12px", paste(c(row$id, if (!is.na(row$requirement_id)) row$requirement_id), collapse = " · ")),
         shiny::tags$div(row$description),
         shiny::tags$div(class = if (row$live_result == "pass") "mb-check-pass" else "mb-check-fail", sprintf("%s · %s", toupper(row$live_result), row$live_message)),
-        shiny::tags$div(class = "mb-caption", recorded)
+        shiny::tags$div(class = "mb-caption", recorded),
+        confirm_button("Delete", ns("delete_assertion"), row$id, sprintf("Delete assertion %s?", row$id),
+                       "Its recorded runs and its link to the requirement go with it. Undo brings the assertion and link back.",
+                       confirm = "Delete assertion", class = "mb-btn mb-btn-small")
       )
     }),
     shiny::actionButton(ns("add_assertion"), "Add assertion…", class = "mb-btn mb-btn-small")
@@ -798,16 +908,30 @@ mod_machines_server <- function(id, state) {
 
     output$definitions <- shiny::renderUI({
       m <- machine()
-      shiny::tags$section(
-        class = "mb-inspector",
-        shiny::tags$b("Events and variables"),
-        shiny::tags$div(class = "mono", style = "font-size:12px", paste(m$events$name, collapse = ", ")),
-        shiny::tags$div(class = "mono", style = "font-size:12px", paste(sprintf("%s: %s = %s", m$variables$name, m$variables$value_type, m$variables$initial_value), collapse = "; ")),
-        shiny::tags$div(class = "mb-head",
-                        shiny::actionButton(ns("add_event"), "Add event…", class = "mb-btn mb-btn-small"),
-                        shiny::actionButton(ns("add_variable"), "Add variable…", class = "mb-btn mb-btn-small"))
-      )
+      interfaces <- DBI::dbGetQuery(con(), "SELECT id, name FROM interface ORDER BY name")
+      fields <- DBI::dbGetQuery(con(), "SELECT interface_id, name FROM interface_field ORDER BY sort_order, name")
+      units <- unit_list(con())$symbol
+      render_machine_definitions(m, interfaces, fields, units, delete_effects_text(delete_effects(con(), "state_machine", m$id)), ns)
     })
+    shiny::observeEvent(input$machine_rename, behavior_edit(state, rename_state_machine(con(), sm_id(), input$machine_rename$value), "rename state machine"))
+    shiny::observeEvent(input$delete_machine, {
+      if (!is.null(behavior_edit(state, delete_entity(con(), "state_machine", input$delete_machine), "delete state machine"))) {
+        shiny::updateSelectInput(session, "machine", selected = "")
+      }
+    })
+    shiny::observeEvent(input$event_rename, behavior_edit(state, rename_sm_event(con(), input$event_rename$id, input$event_rename$value), "rename event"))
+    shiny::observeEvent(input$event_bind, {
+      bind <- input$event_bind
+      event <- read_entity(con(), "sm_event", bind$id)
+      interface <- if (bind$field == "interface") bind$value else event$interface_id
+      field <- if (bind$field == "interface") NA_character_ else bind$value
+      behavior_edit(state, set_event_binding(con(), bind$id, interface, field), "bind event")
+    })
+    shiny::observeEvent(input$delete_event, behavior_edit(state, delete_sm_event(con(), input$delete_event), "delete event"))
+    shiny::observeEvent(input$variable_change, behavior_edit(state, update_sm_variable(con(), input$variable_change$id, input$variable_change$field, input$variable_change$value), "edit variable"))
+    shiny::observeEvent(input$delete_variable, behavior_edit(state, delete_sm_variable(con(), input$delete_variable), "delete variable"))
+    shiny::observeEvent(input$delete_ignore, behavior_edit(state, delete_entity(con(), "sm_ignore", input$delete_ignore), "remove ignore"))
+    shiny::observeEvent(input$delete_assertion, behavior_edit(state, delete_entity(con(), "sm_assertion", input$delete_assertion), "delete assertion"))
     shiny::observeEvent(input$add_event, {
       shiny::showModal(shiny::modalDialog(
         title = "Add an event", shiny::textInput(ns("event_name"), "Name (snake_case)"),

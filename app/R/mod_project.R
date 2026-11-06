@@ -177,11 +177,27 @@ mod_project_server <- function(id, state, workspace_dir) {
       db_dep(state, "model")
       rows <- property_def_list(con())
       if (nrow(rows) == 0L) return(shiny::tags$span(class = "mb-caption", "No properties yet."))
-      rollups <- c(none = "—", sum = "Sum", max = "Largest", min = "Smallest")
-      simple_table(c("Property", "Kind", "Unit", "Roll-up", "Held by"),
+      rollups <- c("None" = "none", "Sum" = "sum", "Largest" = "max", "Smallest" = "min")
+      units <- unit_list(con())
+      simple_table(c("Property", "Kind", "Unit", "Roll-up", "Held by", ""),
                    lapply(seq_len(nrow(rows)), function(i) {
-                     list(rows$label[i], rows$value_type[i], if (is.na(rows$unit[i])) "—" else rows$unit[i],
-                          rollups[[rows$rollup[i]]], sprintf("%d component%s", rows$used[i], if (rows$used[i] == 1L) "" else "s"))
+                     change <- function(field) change_js(ns("p_change"), list(id = rows$id[i], field = field))
+                     number <- rows$value_type[i] == "number"
+                     # A unit changes only within its quantity, so values stay comparable.
+                     same <- if (is.na(rows$unit[i])) units$symbol else units$symbol[units$quantity == units$quantity[units$symbol == rows$unit[i]]]
+                     list(shiny::tags$input(type = "text", value = rows$label[i], onchange = change("label"), `aria-label` = paste("Name of", rows$label[i])),
+                          rows$value_type[i],
+                          if (number) {
+                            select_tag(stats::setNames(same, same), if (is.na(rows$unit[i])) "" else rows$unit[i], change("unit"), "None", label = paste("Unit of", rows$label[i]))
+                          } else {
+                            "—"
+                          },
+                          if (number) select_tag(rollups, rows$rollup[i], change("rollup"), label = paste("Roll-up of", rows$label[i])) else "—",
+                          sprintf("%d component%s", rows$used[i], if (rows$used[i] == 1L) "" else "s"),
+                          if (rows$used[i] == 0L) {
+                            shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", `aria-label` = paste("Delete", rows$label[i]),
+                                               onclick = event_js(ns("p_delete"), rows$id[i]), "Delete")
+                          })
                    }))
     })
     output$budgets <- shiny::renderUI({
@@ -228,6 +244,8 @@ mod_project_server <- function(id, state, workspace_dir) {
       same <- if (is.null(def) || nrow(def) == 0L || is.na(def$unit)) character(0) else units$symbol[units$quantity == units$quantity[units$symbol == def$unit]]
       shiny::updateSelectInput(session, "b_unit", choices = same, selected = if (!is.null(def) && nrow(def) == 1L) def$unit)
     })
+    shiny::observeEvent(input$p_change, model_edit(state, update_property_def(con(), input$p_change$id, input$p_change$field, input$p_change$value), "edit property"))
+    shiny::observeEvent(input$p_delete, model_edit(state, delete_property_def(con(), input$p_delete), "delete property"))
     shiny::observeEvent(input$p_add, {
       written <- model_edit(state, add_property_def(con(), input$p_label, input$p_type, input$p_unit, input$p_rollup), "add property")
       if (!is.null(written)) shiny::updateTextInput(session, "p_label", value = "")

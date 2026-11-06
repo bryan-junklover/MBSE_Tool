@@ -47,6 +47,52 @@ add_property_def <- function(con, label, value_type = "number", unit = NULL, rol
                                         rollup = rollup), author = author, note = "Added in Project settings")
 }
 
+# A property's label, roll-up or unit. Its name stays: budgets, views and guards use it.
+update_property_def <- function(con, property_def_id, field, value, author = "engineer") {
+  def <- read_entity(con, "property_def", property_def_id)
+  if (is.null(def)) refuse("That property no longer exists.")
+  value <- trimws(if (is.null(value)) "" else value)
+  budgets <- DBI::dbGetQuery(con, "SELECT count(*) AS n FROM budget WHERE property_def_id = ?", params = list(property_def_id))$n
+  fields <- switch(field,
+    label = {
+      if (!nzchar(value)) refuse("A property needs a name.")
+      list(label = value)
+    },
+    rollup = {
+      if (!value %in% c("none", "sum", "max", "min")) refuse("Roll-up is none, sum, max or min.")
+      if (def$value_type != "number" && value != "none") refuse("Only a number property can roll up.")
+      if (value == "none" && budgets > 0L) refuse(def$label, " has a budget, which needs a roll-up. Remove the budget first.")
+      list(rollup = value)
+    },
+    unit = {
+      if (def$value_type != "number") refuse("A text property has no unit.")
+      if (!nzchar(value)) {
+        if (budgets > 0L) refuse(def$label, " has a budget, which needs a unit.")
+        list(unit = NA_character_)
+      } else {
+        if (!value %in% unit_list(con)$symbol) refuse(value, " isn't in the unit registry.")
+        if (!is.na(def$unit) && !identical(unit_quantity(con, value), unit_quantity(con, def$unit))) {
+          refuse(def$label, " measures ", unit_quantity(con, def$unit), ", so its unit can't become ", value, ".")
+        }
+        list(unit = value)
+      }
+    },
+    refuse("A property's ", field, " can't be changed here."))
+  write_property_def(con, property_def_id, fields, author, "Property edited")
+}
+
+# A property no component holds and no budget uses can go.
+delete_property_def <- function(con, property_def_id, author = "engineer") {
+  def <- read_entity(con, "property_def", property_def_id)
+  if (is.null(def)) refuse("That property no longer exists.")
+  held <- DBI::dbGetQuery(con, "SELECT count(*) AS n FROM property_value WHERE property_def_id = ?", params = list(property_def_id))$n
+  if (held > 0L) refuse(def$label, " is held by ", held, " component", if (held == 1L) "" else "s", ". Remove it from them first.")
+  if (DBI::dbGetQuery(con, "SELECT count(*) AS n FROM budget WHERE property_def_id = ?", params = list(property_def_id))$n > 0L) {
+    refuse(def$label, " has a budget. Remove the budget first.")
+  }
+  delete_entity(con, "property_def", property_def_id, author)
+}
+
 budget_list <- function(con) {
   status <- budget_status(con)
   rows <- DBI::dbGetQuery(con, "SELECT b.id, b.comparison, b.requirement_id, e.name AS scope_name FROM budget b JOIN element e ON e.id = b.scope_element_id ORDER BY b.id")

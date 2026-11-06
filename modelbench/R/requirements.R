@@ -85,6 +85,24 @@ save_draft <- function(con, text, id = NULL, fields = list(), author = "engineer
 }
 
 # Inspector edits: only the fields that actually changed make a revision.
+# Retires a committed requirement. It leaves the specification, the gate counts and
+# Health, but its history and baselines keep it, and Undo brings it back.
+deprecate_requirement <- function(con, id, reason, author = "engineer") {
+  row <- read_entity(con, "requirement", id)
+  if (is.null(row)) refuse("There's no requirement ", id, ".")
+  if (row$status != "committed") refuse(id, " isn't committed. A draft can be deleted instead.")
+  if (is.null(reason) || !nzchar(trimws(reason))) refuse("Say why ", id, " is being deprecated.")
+  write_requirement(con, id, list(status = "deprecated"), author, paste("Deprecated:", trimws(reason)))
+}
+
+# Drafts were never part of the specification, so they can simply go.
+delete_draft_requirement <- function(con, id, author = "engineer") {
+  row <- read_entity(con, "requirement", id)
+  if (is.null(row)) refuse("There's no requirement ", id, ".")
+  if (row$status != "draft") refuse(id, " is committed, so it's deprecated rather than deleted. That keeps its history.")
+  delete_entity(con, "requirement", id, author, "Draft deleted")
+}
+
 save_requirement_details <- function(con, id, fields, author = "engineer") {
   allowed <- c("short_title", "parent_id", "level", "req_type", "rationale", "verification_method")
   unknown <- setdiff(names(fields), allowed)
