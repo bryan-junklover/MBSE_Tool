@@ -2,7 +2,7 @@
 # (docs/VIEWPOINTS_AND_FAILURES.md §2). A viewpoint names the domains and flow types it
 # covers and its sections in order; each section is a function that returns Markdown.
 
-VIEWPOINT_SECTIONS <- c("summary", "breakdown", "interfaces", "budgets", "software", "signals", "states", "requirements", "open_items")
+VIEWPOINT_SECTIONS <- c("summary", "breakdown", "interfaces", "budgets", "software", "signals", "states", "failures", "requirements", "open_items")
 
 viewpoint_list <- function(con) {
   DBI::dbGetQuery(con, "SELECT id, name, stakeholder, concerns, rules_json, is_builtin FROM viewpoint ORDER BY sort_order, name")
@@ -15,7 +15,8 @@ read_viewpoint <- function(con, viewpoint_id) {
   unknown <- setdiff(rules$sections, VIEWPOINT_SECTIONS)
   if (length(unknown) > 0L) refuse("Viewpoint ", viewpoint_id, " names a section that doesn't exist: ", paste(unknown, collapse = ", "), ".")
   list(id = row$id, name = row$name, stakeholder = row$stakeholder, concerns = row$concerns,
-       domains = as.character(rules$domains), flow_types = as.character(rules$flow_types), sections = as.character(rules$sections))
+       domains = as.character(rules$domains), flow_types = as.character(rules$flow_types), sections = as.character(rules$sections),
+       failure_causes = if (is.null(rules$failure_causes)) names(FAILURE_CAUSES) else as.character(rules$failure_causes))
 }
 
 # What a viewpoint covers: its components, the physical interfaces their ports use, and the
@@ -173,6 +174,64 @@ viewpoint_section_states <- function(con, viewpoint, scope, source) {
   doc_section("States and transitions", paste(parts, collapse = "\n"))
 }
 
+# Failure modes inside a viewpoint: about its parts, interfaces or (when it shows states)
+# its state machines, with a cause the viewpoint covers.
+viewpoint_failures <- function(con, viewpoint, scope) {
+  modes <- failure_mode_list(con)
+  ports <- DBI::dbGetQuery(con, "SELECT id, element_id FROM port")
+  states <- DBI::dbGetQuery(con, "SELECT id, sm_id FROM sm_state")
+  inside <- vapply(seq_len(nrow(modes)), function(i) {
+    id <- modes$subject_id[i]
+    switch(modes$subject_kind[i],
+           element = id %in% scope$components$id,
+           port = ports$element_id[match(id, ports$id)] %in% scope$components$id,
+           interface = id %in% scope$interfaces$id,
+           sm_state = "states" %in% viewpoint$sections && states$sm_id[match(id, states$id)] %in% scope$machines$id,
+           FALSE)
+  }, TRUE)
+  modes[inside & modes$cause_kind %in% viewpoint$failure_causes, , drop = FALSE]
+}
+
+viewpoint_section_failures <- function(con, viewpoint, scope, source) {
+  modes <- viewpoint_failures(con, viewpoint, scope)
+  if (nrow(modes) == 0L) return(doc_section("Failure modes", "_None recorded in this part of the model._"))
+  join <- function(a, b) ifelse(is.na(a) & is.na(b), "—", ifelse(is.na(b), a, ifelse(is.na(a), b, paste(a, "→", b))))
+  response <- vapply(seq_len(nrow(modes)), function(i) {
+    parts <- c(sprintf("**%s**", FAILURE_RESPONSES[[modes$response_state[i]]]),
+               if (!is.na(modes$response_note[i])) modes$response_note[i],
+               if (nzchar(modes$handled_by[i])) sprintf("(%s)", modes$handled_by[i]))
+    paste(parts, collapse = " ")
+  }, "")
+  cause <- ifelse(is.na(modes$cause), FAILURE_CAUSES[modes$cause_kind], paste0(FAILURE_CAUSES[modes$cause_kind], " — ", modes$cause))
+  body <- paste0("Effects read nearby → system. A response that isn't decided is an open item.\n\n",
+                 md_table(c("ID", "What fails", "Cause", "Effect", "Detected by", "Response"),
+                          data.frame(modes$id, modes$subject, unname(cause), join(modes$local_effect, modes$system_effect), or_dash(modes$detected_by), response)))
+  doc_section("Failure modes", body)
+}
+
+# Failure checks that land inside a viewpoint.
+viewpoint_failure_findings <- function(con, viewpoint, scope) {
+  findings <- failure_findings(con)
+  if (nrow(findings) == 0L) return(character(0))
+  shown <- viewpoint_failures(con, viewpoint, scope)$id
+  ports <- DBI::dbGetQuery(con, "SELECT id, element_id FROM port")
+  fields <- DBI::dbGetQuery(con, "SELECT id, interface_id FROM interface_field")
+  # A missing-case check shows where its cause would. Signal loss is about software that
+  # receives data, so it goes with "stale", which only software viewpoints cover.
+  rule_cause <- c(missing_signal_loss = "stale", missing_power_loss = "lost", missing_over_temperature = "over_temperature", missing_out_of_range = "out_of_range")
+  keep <- vapply(seq_len(nrow(findings)), function(i) {
+    row <- findings[i, ]
+    if (row$subject_kind == "failure_mode") return(row$subject_id %in% shown)
+    if (!rule_cause[[row$rule]] %in% viewpoint$failure_causes) return(FALSE)
+    switch(row$subject_kind,
+           port = ports$element_id[match(row$subject_id, ports$id)] %in% scope$components$id,
+           element = row$subject_id %in% scope$components$id,
+           interface_field = fields$interface_id[match(row$subject_id, fields$id)] %in% scope$interfaces$id,
+           FALSE)
+  }, TRUE)
+  findings$text[keep]
+}
+
 viewpoint_requirements <- function(con, scope) {
   rows <- DBI::dbGetQuery(con, "SELECT r.id, r.short_title, r.text, r.verification_method, l.target_id
                                   FROM requirement r JOIN link l ON l.link_type = 'satisfied_by' AND l.source_kind = 'requirement' AND l.source_id = r.id
@@ -230,6 +289,7 @@ viewpoint_open_items <- function(con, viewpoint, scope) {
         with(placeholders[placeholders$entity_kind == "sm_transition" & placeholders$owner_id %in% scope$machines$id, , drop = FALSE],
              sprintf("%s: %s time is a placeholder.", scope$machines$name[match(owner_id, scope$machines$id)], sub(" hold$", "", item))))
     },
+    if ("failures" %in% viewpoint$sections) viewpoint_failure_findings(con, viewpoint, scope),
     if ("budgets" %in% viewpoint$sections) {
       budgets <- budget_status(con)
       sprintf("%s budget is over its limit: %s.", budgets$label[!budgets$pass], budgets$text[!budgets$pass])

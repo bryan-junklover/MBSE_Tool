@@ -3,13 +3,16 @@ test_that("split_sql ignores semicolons in comments and strings", {
   expect_identical(split_sql(sql), c("CREATE TABLE a (b TEXT DEFAULT 'x;y')", "SELECT 1"))
 })
 
+# The newest migration's number: what every project ends up at.
+latest_version <- function() max(as.integer(sub("_.*$", "", list.files(migrations_dir(), pattern = "^[0-9]+_.*[.]sql$"))))
+
 test_that("schema runs twice and sets the version once", {
   path <- withr::local_tempfile(fileext = ".sqlite")
   first <- init_project_db(path)
   DBI::dbDisconnect(first)
   second <- init_project_db(path)
   on.exit(DBI::dbDisconnect(second))
-  expect_identical(schema_version(second), 2L)
+  expect_identical(schema_version(second), latest_version())
   expect_identical(DBI::dbGetQuery(second, "PRAGMA foreign_keys")$foreign_keys, 1L)
   expect_identical(DBI::dbGetQuery(second, "PRAGMA journal_mode")$journal_mode, "wal")
 })
@@ -17,10 +20,10 @@ test_that("schema runs twice and sets the version once", {
 test_that("migrations run once, in order, and bump the version", {
   con <- local_project()
   dir <- withr::local_tempdir()
-  writeLines("CREATE TABLE m2 (x TEXT);", file.path(dir, "003_second.sql"))
-  writeLines("CREATE TABLE m1 (x TEXT); -- old version, skipped", file.path(dir, "002_first.sql"))
+  writeLines("CREATE TABLE m2 (x TEXT);", file.path(dir, sprintf("%03d_second.sql", latest_version() + 1L)))
+  writeLines("CREATE TABLE m1 (x TEXT); -- old version, skipped", file.path(dir, sprintf("%03d_first.sql", latest_version())))
   run_migrations(con, dir)
-  expect_identical(schema_version(con), 3L)
+  expect_identical(schema_version(con), latest_version() + 1L)
   expect_true(DBI::dbExistsTable(con, "m2"))
   expect_false(DBI::dbExistsTable(con, "m1"))
   expect_no_error(run_migrations(con, dir))
@@ -29,9 +32,9 @@ test_that("migrations run once, in order, and bump the version", {
 test_that("a failed migration rolls back whole", {
   con <- local_project()
   dir <- withr::local_tempdir()
-  writeLines("CREATE TABLE m2 (x TEXT); SELECT nope FROM nothing;", file.path(dir, "003_bad.sql"))
+  writeLines("CREATE TABLE m2 (x TEXT); SELECT nope FROM nothing;", file.path(dir, sprintf("%03d_bad.sql", latest_version() + 1L)))
   expect_error(run_migrations(con, dir))
-  expect_identical(schema_version(con), 2L)
+  expect_identical(schema_version(con), latest_version())
   expect_false(DBI::dbExistsTable(con, "m2"))
 })
 
@@ -51,7 +54,7 @@ test_that("migration 002 lets an existing project record where software runs", {
 
   con <- init_project_db(path)
   on.exit(DBI::dbDisconnect(con))
-  expect_identical(schema_version(con), 2L)
+  expect_identical(schema_version(con), latest_version())
   expect_identical(DBI::dbGetQuery(con, "SELECT * FROM link ORDER BY id"), links)
   expect_no_error(DBI::dbExecute(con, "INSERT INTO link (id, link_type, source_kind, source_id, target_kind, target_id)
                                        VALUES ('L-0003', 'hosted_on', 'element', 'C-009', 'element', 'C-008')"))
@@ -60,6 +63,29 @@ test_that("migration 002 lets an existing project record where software runs", {
                   c("idx_link_source", "idx_link_target"))
   # The views that read links still work.
   expect_no_error(DBI::dbGetQuery(con, "SELECT * FROM v_unallocated_requirements"))
+})
+
+test_that("migration 003 lets a version 2 project link failure modes", {
+  path <- withr::local_tempfile(fileext = ".sqlite")
+  con <- init_project_db(path)
+  DBI::dbDisconnect(con)
+  # Put the project back at version 2: the link table without the failure links.
+  old <- open_project_db(path)
+  run_sql_file(old, file.path(migrations_dir(), "002_hosted_on.sql"))
+  DBI::dbExecute(old, "UPDATE project_meta SET value = '2' WHERE key = 'schema_version'")
+  expect_error(DBI::dbExecute(old, "INSERT INTO link (id, link_type, source_kind, source_id, target_kind, target_id)
+                                    VALUES ('L-0001', 'detected_by', 'failure_mode', 'FM-0001', 'sm_event', 'E-01')"), "CHECK")
+  DBI::dbExecute(old, "INSERT INTO link (id, link_type, source_kind, source_id, target_kind, target_id)
+                       VALUES ('L-0002', 'hosted_on', 'element', 'C-009', 'element', 'C-008')")
+  DBI::dbDisconnect(old)
+
+  con <- init_project_db(path)
+  on.exit(DBI::dbDisconnect(con))
+  expect_identical(schema_version(con), 3L)
+  expect_identical(DBI::dbGetQuery(con, "SELECT id FROM link")$id, "L-0002")
+  expect_no_error(DBI::dbExecute(con, "INSERT INTO link (id, link_type, source_kind, source_id, target_kind, target_id)
+                                       VALUES ('L-0001', 'detected_by', 'failure_mode', 'FM-0001', 'sm_event', 'E-01')"))
+  expect_identical(DBI::dbGetQuery(con, "PRAGMA integrity_check")$integrity_check, "ok")
 })
 
 test_that("every revisioned kind has a rev column and a known id scheme", {

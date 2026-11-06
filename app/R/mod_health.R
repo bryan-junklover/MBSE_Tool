@@ -110,6 +110,11 @@ render_health <- function(health, input_id, next_id = "The next baseline") {
         health_row("Messages using a missing field", health$behavior$missing_fields, list(place = "scenarios"), input_id),
         health_row("Unhandled event/state pairs", health$behavior$unhandled, list(place = "machines"), input_id)
       )),
+      health_card("Failures", c(
+        health_row("Failure modes", health$failures$modes, list(place = "failures"), input_id, problem = FALSE),
+        health_row("Open responses", health$failures$open, list(place = "failures"), input_id),
+        health_row("Cases not covered", health$failures$missing, list(place = "failures"), input_id)
+      )),
       health_card("Budgets (roll-up)", c(
         unlist(lapply(seq_len(nrow(health$budgets)), function(i) {
           budget <- health$budgets[i, ]
@@ -173,6 +178,7 @@ follow_blocker <- function(state, target) {
     interfaces = go_to(state, "Model", "Interfaces"),
     scenarios = go_to(state, "Behavior", "Scenarios"),
     machines = go_to(state, "Behavior", "State machines"),
+    failures = go_to(state, "Behavior", "Failure modes"),
     review = go_to(state, "Analyze", "Review queue"),
     go_to(state, "Behavior")
   )

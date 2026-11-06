@@ -345,6 +345,12 @@ model_health <- function(con) {
       missing_fields = nrow(missing_field_steps(con)),
       unhandled = count_of(con, "SELECT count(*) AS n FROM v_sm_unhandled")
     ),
+    failures = local({
+      findings <- failure_findings(con)
+      list(modes = count_of(con, "SELECT count(*) AS n FROM failure_mode"),
+           open = sum(findings$rule %in% c("open_response", "handled_unlinked", "handled_unverified")),
+           missing = sum(findings$rule %in% WAIVABLE_RULES))
+    }),
     budgets = budget_status(con),
     analyses = analysis_status(con),
     ai = list(

@@ -77,6 +77,21 @@ validate_entity <- function(con, kind, id, row, existing = NULL) {
       refuse("Can't save ", id, ": owner ", row$owner_kind, " ", row$owner_id, " doesn't exist.")
     }
   }
+  if (kind == "failure_mode") {
+    if (!row$subject_kind %in% FAILURE_SUBJECT_KINDS || !polymorphic_exists(con, row$subject_kind, row$subject_id)) {
+      refuse("Can't save ", id, ": what fails (", row$subject_kind, " ", row$subject_id, ") isn't in the model.")
+    }
+    if (!is.null(row$field_name) && !is.na(row$field_name) && nzchar(row$field_name) &&
+        nrow(DBI::dbGetQuery(con, "SELECT 1 FROM interface_field WHERE interface_id = ? AND name = ?", params = list(row$subject_id, row$field_name))) == 0L) {
+      refuse("Can't save ", id, ": ", row$subject_id, " has no field ", row$field_name, ".")
+    }
+  }
+  if (kind == "link" && row$link_type %in% names(FAILURE_LINK_TARGETS)) {
+    if (!identical(row$source_kind, "failure_mode") || !row$target_kind %in% FAILURE_LINK_TARGETS[[row$link_type]]) {
+      refuse(if (row$link_type == "detected_by") "Detected by" else "Handled by", " links a failure mode to a ",
+             paste(FAILURE_TARGET_LABELS[FAILURE_LINK_TARGETS[[row$link_type]]], collapse = ", "), ".")
+    }
+  }
   if (kind == "link") {
     for (end in c("source", "target")) {
       end_kind <- row[[paste0(end, "_kind")]]
@@ -169,6 +184,10 @@ direct_dependents <- function(con, kind, id) {
     ids <- DBI::dbGetQuery(con, "SELECT id FROM property_value WHERE owner_kind = ? AND owner_id = ?",
                            params = list(kind, id))$id
     found <- c(found, lapply(ids, function(x) list(kind = "property_value", id = x)))
+  }
+  if (kind %in% FAILURE_SUBJECT_KINDS) {
+    ids <- DBI::dbGetQuery(con, "SELECT id FROM failure_mode WHERE subject_kind = ? AND subject_id = ?", params = list(kind, id))$id
+    found <- c(found, lapply(ids, function(x) list(kind = "failure_mode", id = x)))
   }
   if (kind %in% LINK_END_KINDS) {
     ids <- DBI::dbGetQuery(con, paste("SELECT id FROM link WHERE (source_kind = ?1 AND source_id = ?2)",

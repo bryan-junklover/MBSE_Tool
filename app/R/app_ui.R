@@ -102,6 +102,7 @@ app_ui <- function() {
             id = "behavior_tab", selected = "Scenarios",
             screen("Behavior", "Scenarios", mod_scenarios_ui, "scenarios"),
             screen("Behavior", "State machines", mod_machines_ui, "machines"),
+            screen("Behavior", "Failure modes", mod_failures_ui, "failures"),
             screen("Behavior", "Behavioral impact", mod_behavior_impact_ui, "behavior_impact")
           )
         ),
@@ -124,7 +125,7 @@ app_ui <- function() {
 WORKSPACE_TABS <- list(
   Write = c("Draft", "Specification", "Traceability"),
   Model = c("Structure", "Flows", "Functional", "Interfaces", "Stakeholder"),
-  Behavior = c("Scenarios", "State machines", "Behavioral impact"),
+  Behavior = c("Scenarios", "State machines", "Failure modes", "Behavioral impact"),
   Analyze = c("Health", "Review queue", "Baselines & impact", "Documents")
 )
 TAB_SETS <- c(Write = "write_tab", Model = "model_tab", Behavior = "behavior_tab", Analyze = "analyze_tab")
@@ -243,6 +244,7 @@ app_server <- function(input, output, session) {
   mod_stakeholder_server("stakeholder", state)
   mod_scenarios_server("scenarios", state)
   mod_machines_server("machines", state)
+  mod_failures_server("failures", state)
   mod_behavior_impact_server("behavior_impact", state)
   mod_ai_settings_server("ai_settings", state)
   mod_chat_server("chat_panel", state)

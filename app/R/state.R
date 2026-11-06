@@ -10,6 +10,7 @@ new_app_state <- function(con) {
     selected_requirement = shiny::reactiveVal(NULL),
     selected_entity = shiny::reactiveVal(list(kind = "none", ids = character(0))),
     selected_interface = shiny::reactiveVal(NULL),
+    selected_failure = shiny::reactiveVal(NULL),
     commands = shiny::reactiveVal(new_command_stack()),
     open_in_write = shiny::reactiveVal(NULL),
     behavior_focus = shiny::reactiveVal(NULL),

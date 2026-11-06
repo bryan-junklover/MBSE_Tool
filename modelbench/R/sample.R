@@ -19,7 +19,7 @@ SAMPLE_BUILD_ORDER <- c(
   "interface", "interface_field", "port", "connector", "property_value", "test_case",
   "scenario", "seq_lifeline", "seq_step", "act_node", "act_edge", "state_machine",
   "sm_state", "sm_event", "sm_event_scope", "sm_variable", "sm_transition", "sm_ignore",
-  "sm_assertion", "link"
+  "sm_assertion", "failure_mode", "failure_waiver", "link"
 )
 
 # Values that differ in BL-03 form. FLD-0005 didn't exist then.

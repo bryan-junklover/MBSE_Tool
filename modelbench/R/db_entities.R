@@ -4,7 +4,8 @@
 ENTITY_KEYS <- list(
   analysis_limit = c("analysis", "scope_id"),
   sm_event_scope = c("event_id", "state_id"),
-  sm_ignore = c("state_id", "event_id")
+  sm_ignore = c("state_id", "event_id"),
+  failure_waiver = c("rule", "subject_kind", "subject_id")
 )
 
 ENTITY_AREAS <- c(
@@ -16,7 +17,7 @@ ENTITY_AREAS <- c(
   act_node = "behavior", act_edge = "behavior", state_machine = "behavior",
   sm_state = "behavior", sm_event = "behavior", sm_event_scope = "behavior",
   sm_variable = "behavior", sm_transition = "behavior", sm_ignore = "behavior",
-  sm_assertion = "behavior"
+  sm_assertion = "behavior", failure_mode = "model", failure_waiver = "model"
 )
 
 ENTITY_PREFIXES <- c(
@@ -25,7 +26,7 @@ ENTITY_PREFIXES <- c(
   link = "L", test_case = "TC", scenario = "SC", seq_lifeline = "LL",
   seq_step = "ST", act_node = "N", act_edge = "G", state_machine = "SM",
   sm_state = "S", sm_event = "E", sm_variable = "VAR", sm_transition = "T",
-  sm_assertion = "A"
+  sm_assertion = "A", failure_mode = "FM"
 )
 
 # sprintf() format per prefix, matching the ids the sample uses.
@@ -36,7 +37,7 @@ ID_FORMATS <- c(
   E = "E-%02d", T = "T-%02d", VAR = "VAR-%d", LL = "LL-%d", A = "A-%03d",
   N = "N-%d", G = "G-%d", TC = "TC-%03d", VR = "VR-%04d", BL = "BL-%02d",
   PR = "PR-%04d", L = "L-%04d", V = "V-%04d", B = "B-%03d", VW = "VW-%04d",
-  CS = "CS-%04d", CF = "CF-%04d"
+  CS = "CS-%04d", CF = "CF-%04d", FM = "FM-%04d"
 )
 
 revisioned_kinds <- function() names(ENTITY_AREAS)
@@ -103,4 +104,9 @@ ENTITY_CHILDREN <- list(
 
 PROPERTY_OWNER_KINDS <- c("element", "connector", "interface", "requirement")
 LINK_END_KINDS <- c("requirement", "element", "connector", "interface", "scenario",
-                    "state_machine", "test_case", "sm_assertion")
+                    "state_machine", "test_case", "sm_assertion", "failure_mode", "sm_event", "sm_transition")
+
+# What a failure mode can be about, and what each failure link may point at.
+FAILURE_SUBJECT_KINDS <- c("element", "interface", "port", "sm_state")
+FAILURE_LINK_TARGETS <- list(detected_by = c("sm_event", "requirement", "test_case"),
+                             handled_by = c("sm_transition", "requirement", "element"))

@@ -1,6 +1,6 @@
 # Stakeholder viewpoints and failure modes
 
-**Status:** agreed, 2026-11-06; steps 1 and 2 done · **Owner:** the systems engineer
+**Status:** agreed, 2026-11-06; steps 1–3 done · **Owner:** the systems engineer
 
 ## Why
 
@@ -155,7 +155,8 @@ Each step is useful by itself.
 1. **`hosted_on` links**, with the migration and the check. *Done in ac45f1e.*
 2. **Viewpoint documents** for Hardware, Software and Systems, built from data that already exists. *Done: Analyze › Documents.*
    This pays off before failure modes exist.
-3. **Failure modes:** table, links, inspector editing in the Systems view, checks, and the
+3. *Done: Behavior › Failure modes, a Failures card on Health, and a section in each document.*
+   **Failure modes:** table, links, inspector editing in the Systems view, checks, and the
    document section.
 4. **Effect chains.**
 5. **AI suggestions.**

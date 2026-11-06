@@ -71,6 +71,13 @@ Anything that deletes asks first, and says what goes with it.
   language: `gnss_valid == false`, `soc := soc - 5`, `prop(Power System.battery_capacity) > 4000`.
   The Completeness panel lists event/state pairs that need a transition, or an
   "ignore" with your note. Requirement checks run every assertion live.
+- **Failure modes:** what can fail, its cause, the effect nearby and on the system, and
+  the response: handled, accepted (with your reason), unhandled or not decided. Link each
+  one to the state machine event that detects it and the transition, requirement or
+  component that handles it. The Checks column lists failures still open and cases
+  nobody has recorded: software receiving a signal from hardware with no "lost" case,
+  power feeds, parts that draw power, and ranged fields. **Add … failure** starts one
+  from the check; **Doesn't apply…** sets a check aside with your reason.
 - **Behavioral impact:** for a change since the last baseline, the scenarios it
   reaches, with the affected steps highlighted, before and after.
 
@@ -87,7 +94,8 @@ Anything that deletes asks first, and says what goes with it.
   physical breakdown (with the software each part runs), interfaces, budgets and
   properties. **Software** covers where each piece of software runs, the signals it
   exchanges with their ranges, and state and transition tables. **Systems** has
-  everything, for reporting. Each ends with the open items in its part of the model.
+  everything, for reporting. Each lists its failure modes (physical ones in Hardware) and
+  ends with the open items in its part of the model.
   Choose **From** to build one from a baseline instead of the working copy, then
   export HTML or PDF. Export needs Quarto, like the ICD.
 

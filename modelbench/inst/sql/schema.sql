@@ -309,10 +309,12 @@ CREATE TABLE IF NOT EXISTS link (
                    'derives_from',        -- requirement  -> requirement (outside the parent tree)
                    'refines',             -- requirement  -> requirement | scenario
                    'verified_by',         -- requirement  -> test_case | scenario | sm_assertion
+                   'detected_by',         -- failure_mode -> sm_event | requirement | test_case
+                   'handled_by',          -- failure_mode -> sm_transition | requirement | element
                    'traces_to')),         -- anything     -> anything (fallback, discouraged)
-  source_kind    TEXT NOT NULL CHECK (source_kind IN ('requirement','element','connector','interface','scenario','state_machine','test_case','sm_assertion')),
+  source_kind    TEXT NOT NULL CHECK (source_kind IN ('requirement','element','connector','interface','scenario','state_machine','test_case','sm_assertion','failure_mode','sm_event','sm_transition')),
   source_id      TEXT NOT NULL,
-  target_kind    TEXT NOT NULL CHECK (target_kind IN ('requirement','element','connector','interface','scenario','state_machine','test_case','sm_assertion')),
+  target_kind    TEXT NOT NULL CHECK (target_kind IN ('requirement','element','connector','interface','scenario','state_machine','test_case','sm_assertion','failure_mode','sm_event','sm_transition')),
   target_id      TEXT NOT NULL,
   rationale      TEXT,
   origin         TEXT NOT NULL DEFAULT 'human' CHECK (origin IN ('human','ai_candidate')),
@@ -549,6 +551,42 @@ INSERT OR IGNORE INTO view_def (id, name, view_kind, filter_json, is_builtin) VA
  ('VW-flows', 'Flows', 'flows', '{"kinds":["component","external"]}', 1),
  ('VW-functional', 'Functional', 'functional', NULL, 1);
 
+-- Failure modes: what can fail, why, what happens next, and how the system responds
+-- (docs/VIEWPOINTS_AND_FAILURES.md §3). Effects and responses only; no FMEA scoring.
+CREATE TABLE IF NOT EXISTS failure_mode (
+  id             TEXT PRIMARY KEY,        -- FM-0001
+  rev            INTEGER NOT NULL DEFAULT 1,
+  subject_kind   TEXT NOT NULL CHECK (subject_kind IN ('element','interface','port','sm_state')),
+  subject_id     TEXT NOT NULL,
+  field_name     TEXT,                    -- one field of an interface, or NULL for the whole interface
+  cause_kind     TEXT NOT NULL CHECK (cause_kind IN ('lost','stale','out_of_range','erroneous','degraded','failed',
+                                                     'open_circuit','short_circuit','over_temperature','mechanical','other')),
+  cause          TEXT,                    -- in the engineer's words
+  local_effect   TEXT,
+  system_effect  TEXT,
+  response_state TEXT NOT NULL DEFAULT 'placeholder' CHECK (response_state IN ('handled','accepted','unhandled','placeholder')),
+  response_note  TEXT,                    -- how it's handled, or why it's accepted
+  origin         TEXT NOT NULL DEFAULT 'human' CHECK (origin IN ('human','ai')),
+  review_state   TEXT NOT NULL DEFAULT 'reviewed' CHECK (review_state IN ('reviewed','unreviewed')),
+  review_note    TEXT,
+  CHECK (field_name IS NULL OR subject_kind = 'interface'),
+  CHECK (response_state <> 'accepted' OR length(trim(coalesce(response_note,''))) > 0),
+  -- The AI drafts causes and effects, never a response.
+  CHECK (origin = 'human' OR review_state = 'reviewed' OR response_state = 'placeholder'),
+  CHECK (origin = 'human' OR review_state = 'unreviewed' OR length(trim(coalesce(review_note,''))) > 0)
+);
+CREATE INDEX IF NOT EXISTS idx_failure_mode_subject ON failure_mode(subject_kind, subject_id);
+
+-- A missing-case check (rules 3-5) set aside for one subject, with the reason.
+CREATE TABLE IF NOT EXISTS failure_waiver (
+  rule         TEXT NOT NULL CHECK (rule IN ('missing_signal_loss','missing_power_loss','missing_over_temperature','missing_out_of_range')),
+  subject_kind TEXT NOT NULL CHECK (subject_kind IN ('port','element','interface_field')),
+  subject_id   TEXT NOT NULL,
+  rationale    TEXT NOT NULL CHECK (length(trim(rationale)) > 0),
+  rev          INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (rule, subject_kind, subject_id)
+);
+
 -- Stakeholder viewpoints: who a document is for, what it covers, and its sections in order
 -- (docs/VIEWPOINTS_AND_FAILURES.md). Read-only views of the model, delivered as documents.
 CREATE TABLE IF NOT EXISTS viewpoint (
@@ -565,14 +603,14 @@ CREATE TABLE IF NOT EXISTS viewpoint (
 -- "unset" in domains means elements with no domain recorded.
 INSERT OR REPLACE INTO viewpoint (id, name, stakeholder, concerns, rules_json, sort_order, is_builtin) VALUES
  ('VP-hardware', 'Hardware', 'Hardware engineers',
-  'What each part is, what it weighs and draws, what plugs into what, and which software runs on it.',
-  '{"domains":["hw","hw_sw","other","unset"],"flow_types":["energy","matter","data"],"sections":["summary","breakdown","interfaces","budgets","requirements","open_items"]}', 1, 1),
+  'What each part is, what it weighs and draws, what plugs into what, which software runs on it, and how it can fail.',
+  '{"domains":["hw","hw_sw","other","unset"],"flow_types":["energy","matter","data"],"sections":["summary","breakdown","interfaces","budgets","failures","requirements","open_items"],"failure_causes":["lost","failed","degraded","open_circuit","short_circuit","over_temperature","mechanical"]}', 1, 1),
  ('VP-software', 'Software', 'Software engineers',
-  'Where each piece of software runs, the signals it exchanges with their ranges, and how its states respond to events.',
-  '{"domains":["sw","hw_sw"],"flow_types":["data"],"sections":["summary","software","signals","states","requirements","open_items"]}', 2, 1),
+  'Where each piece of software runs, the signals it exchanges with their ranges, how its states respond to events, and what it does when things fail.',
+  '{"domains":["sw","hw_sw"],"flow_types":["data"],"sections":["summary","software","signals","states","failures","requirements","open_items"],"failure_causes":["lost","stale","out_of_range","erroneous","degraded","failed","other"]}', 2, 1),
  ('VP-systems', 'Systems', 'Systems engineering and reporting',
-  'The whole model in one document: structure, interfaces, budgets, software, behaviour and open items.',
-  '{"domains":["hw","sw","hw_sw","other","unset"],"flow_types":["energy","matter","data"],"sections":["summary","breakdown","interfaces","budgets","software","signals","states","requirements","open_items"]}', 3, 1);
+  'The whole model in one document: structure, interfaces, budgets, software, behaviour, failures and open items.',
+  '{"domains":["hw","sw","hw_sw","other","unset"],"flow_types":["energy","matter","data"],"sections":["summary","breakdown","interfaces","budgets","software","signals","states","failures","requirements","open_items"]}', 3, 1);
 
 CREATE TABLE IF NOT EXISTS layout (
   view_id    TEXT NOT NULL REFERENCES view_def(id) ON DELETE CASCADE,
