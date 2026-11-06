@@ -1,5 +1,5 @@
 ---
-title: "{{title}}: interface control document"
+title: "{{title}}"
 date: "{{date}}"
 format:
   html:

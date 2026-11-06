@@ -1,4 +1,4 @@
-# Handoff §7 / UX review 4.6: no screen scrolls sideways at 900 px. Runs the real app in
+# Handoff §7 / UX review 4.6: no screen scrolls sideways at 900 px (16 screens with Documents). Runs the real app in
 # headless Chrome, so it needs shinytest2 and a Chrome that chromote can find.
 # Set MODELBENCH_SKIP_BROWSER_TESTS=true to leave it out.
 test_that("no screen scrolls sideways at 900 px", {
@@ -19,7 +19,7 @@ test_that("no screen scrolls sideways at 900 px", {
                unlist(lapply(names(WORKSPACE_TABS), function(workspace) {
                  lapply(WORKSPACE_TABS[[workspace]], function(tab) list(workspace = workspace, tab = tab))
                }), recursive = FALSE))
-  expect_length(screens, 15L)
+  expect_length(screens, 16L)
   overflow <- vapply(screens, function(screen) {
     # Clicks the workspace, then the tab, as a user would.
     click <- function(scope, label) {

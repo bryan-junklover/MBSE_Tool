@@ -1,6 +1,6 @@
 # Stakeholder viewpoints and failure modes
 
-**Status:** proposal, 2026-11-06 · **Owner:** the systems engineer
+**Status:** agreed, 2026-11-06; steps 1 and 2 done · **Owner:** the systems engineer
 
 ## Why
 
@@ -20,6 +20,9 @@ Safety, test and operations will follow with needs of their own.
 |---|---|
 | Who edits the model? | Only the systems engineer. Viewpoints are read-only. |
 | How do stakeholders get their view? | As exported documents, tailored to a viewpoint or combined for reporting. There's no in-app lens for now. |
+| Formats | HTML and PDF. Word isn't needed. |
+| Live model or baseline? | The live model by default; a baseline can be chosen instead. |
+| Physical failures in the Hardware document? | Yes: connector, power, thermal and other physical failures, as well as where software failures reach hardware. |
 | Are viewpoints code or data? | Data: one row per viewpoint. New stakeholder groups need no new code. |
 | How much failure analysis? | Effects and responses only. No severity, occurrence or detection scores (no RPN). |
 | AI's role in failure analysis | A sense check that suggests failure modes nobody recorded. Its suggestions go to the review queue; it never marks anything handled. |
@@ -72,14 +75,14 @@ Quarto renders the result to HTML or PDF.
 | Software components, their hosts and their functions | | ✓ | ✓ |
 | Signal list: data interfaces, fields, types, units, ranges | | ✓ | ✓ |
 | States and transitions, as a table per state machine | | ✓ | ✓ |
-| Failure modes and responses (§3) | power and physical faults only | ✓ | ✓ |
+| Failure modes and responses (§3) | physical failures: hardware elements and energy, matter and physical-layer interfaces | software elements, data interfaces and states | ✓ |
 | Effect chains (§4) | crossing into hardware | ✓ | ✓ |
 | Requirements allocated to what's shown, with verification status | ✓ | ✓ | ✓ |
 | Open items: placeholders, gaps and unhandled failures within this scope | ✓ | ✓ | ✓ |
 
 - **Combined reports** use the Systems viewpoint, or any viewpoint whose sections span domains.
-- **From a baseline:** a document can be rendered from a baseline as well as the live model. The
-  summary names which one it came from, and the model hash.
+- **Live model by default:** a document is rendered from the working copy unless a baseline is
+  chosen. The summary names which one it came from, and the model hash.
 - **In the app:** a Documents screen lists the viewpoints. Each gets a preview, an Export button
   and a short "what this reader gets" line. Editing a viewpoint's sections in the app can wait;
   until then new viewpoints are seeded rows.
@@ -93,7 +96,7 @@ Quarto renders the result to HTML or PDF.
 | Column | Meaning |
 |---|---|
 | `subject_kind`, `subject_id`, `field_name` | What fails: an element, an interface (optionally one field), a port or a state |
-| `cause_kind` | `lost`, `stale`, `out_of_range`, `erroneous`, `degraded`, `failed` or `other` |
+| `cause_kind` | `lost`, `stale`, `out_of_range`, `erroneous`, `degraded` or `failed`; for physical failures also `open_circuit`, `short_circuit`, `over_temperature` or `mechanical`; else `other` |
 | `cause` | The cause in the engineer's words |
 | `local_effect`, `system_effect` | What happens next to it, and to the system |
 | `response_state` | `handled`, `accepted` (with a rationale, like `sm_ignore`), `unhandled` or `placeholder` |
@@ -111,10 +114,13 @@ Quarto renders the result to HTML or PDF.
 2. A failure mode marked `handled` with no `handled_by` link.
 3. A data interface that a `sw` element receives from a `hw` element, with no `lost` or `stale`
    failure mode.
-4. An interface field with a set range on a receiving port, with no `out_of_range` failure mode.
-5. A `handled_by` requirement that has no verification.
+4. A power feed (an `energy` interface) that an element receives, with no `lost` failure mode.
+   A hardware element that dissipates power (a set `power` property) with no `over_temperature`
+   failure mode.
+5. An interface field with a set range on a receiving port, with no `out_of_range` failure mode.
+6. A `handled_by` requirement that has no verification.
 
-Rules 3 and 4 can be noisy. Each can be set to "not applicable" with a reason, as `sm_ignore` does.
+Rules 3–5 can be noisy. Each can be set to "not applicable" with a reason, as `sm_ignore` does.
 
 ## 4. Effect chains
 
@@ -146,8 +152,8 @@ failure mode and in the Effect chains section of each document, cut to that view
 
 Each step is useful by itself.
 
-1. **`hosted_on` links**, with the migration and the check.
-2. **Viewpoint documents** for Hardware, Software and Systems, built from data that already exists.
+1. **`hosted_on` links**, with the migration and the check. *Done in ac45f1e.*
+2. **Viewpoint documents** for Hardware, Software and Systems, built from data that already exists. *Done: Analyze › Documents.*
    This pays off before failure modes exist.
 3. **Failure modes:** table, links, inspector editing in the Systems view, checks, and the
    document section.
@@ -163,9 +169,5 @@ Each step is useful by itself.
 
 ## Open questions
 
-1. **Document format:** HTML and PDF today. Quarto can also produce Word, which stakeholders often
-   want for comments. Is Word needed?
-2. **Live model or baseline by default?** Documents for reporting usually come from a baseline.
-   Working copies for engineers can come from the live model.
-3. **Hardware and failures:** should the Hardware document list physical failure modes such as
-   connector, power and thermal, or only show where software failures reach hardware?
+None at present. The three earlier questions are answered in *Decisions so far*: HTML and PDF
+only, the live model by default, and physical failures listed in the Hardware document.

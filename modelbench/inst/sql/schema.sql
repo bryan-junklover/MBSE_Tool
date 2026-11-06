@@ -549,6 +549,31 @@ INSERT OR IGNORE INTO view_def (id, name, view_kind, filter_json, is_builtin) VA
  ('VW-flows', 'Flows', 'flows', '{"kinds":["component","external"]}', 1),
  ('VW-functional', 'Functional', 'functional', NULL, 1);
 
+-- Stakeholder viewpoints: who a document is for, what it covers, and its sections in order
+-- (docs/VIEWPOINTS_AND_FAILURES.md). Read-only views of the model, delivered as documents.
+CREATE TABLE IF NOT EXISTS viewpoint (
+  id          TEXT PRIMARY KEY,           -- VP-hardware, VP-0001
+  name        TEXT NOT NULL,
+  stakeholder TEXT NOT NULL,              -- who reads it
+  concerns    TEXT NOT NULL,              -- what it answers, in a sentence
+  rules_json  TEXT NOT NULL,              -- {"domains": [...], "flow_types": [...], "sections": [...]}
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  is_builtin  INTEGER NOT NULL DEFAULT 0 CHECK (is_builtin IN (0,1))
+);
+
+-- Built-in viewpoints are rewritten on every open, so they follow the code.
+-- "unset" in domains means elements with no domain recorded.
+INSERT OR REPLACE INTO viewpoint (id, name, stakeholder, concerns, rules_json, sort_order, is_builtin) VALUES
+ ('VP-hardware', 'Hardware', 'Hardware engineers',
+  'What each part is, what it weighs and draws, what plugs into what, and which software runs on it.',
+  '{"domains":["hw","hw_sw","other","unset"],"flow_types":["energy","matter","data"],"sections":["summary","breakdown","interfaces","budgets","requirements","open_items"]}', 1, 1),
+ ('VP-software', 'Software', 'Software engineers',
+  'Where each piece of software runs, the signals it exchanges with their ranges, and how its states respond to events.',
+  '{"domains":["sw","hw_sw"],"flow_types":["data"],"sections":["summary","software","signals","states","requirements","open_items"]}', 2, 1),
+ ('VP-systems', 'Systems', 'Systems engineering and reporting',
+  'The whole model in one document: structure, interfaces, budgets, software, behaviour and open items.',
+  '{"domains":["hw","sw","hw_sw","other","unset"],"flow_types":["energy","matter","data"],"sections":["summary","breakdown","interfaces","budgets","software","signals","states","requirements","open_items"]}', 3, 1);
+
 CREATE TABLE IF NOT EXISTS layout (
   view_id    TEXT NOT NULL REFERENCES view_def(id) ON DELETE CASCADE,
   item_kind  TEXT NOT NULL CHECK (item_kind IN ('element','port','connector','sm_state','act_node')),

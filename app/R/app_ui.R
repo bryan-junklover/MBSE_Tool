@@ -111,7 +111,8 @@ app_ui <- function() {
             id = "analyze_tab", selected = "Health",
             screen("Analyze", "Health", mod_health_ui, "health"),
             screen("Analyze", "Review queue", mod_review_ui, "review"),
-            screen("Analyze", "Baselines & impact", mod_baselines_ui, "baselines")
+            screen("Analyze", "Baselines & impact", mod_baselines_ui, "baselines"),
+            screen("Analyze", "Documents", mod_documents_ui, "documents")
           )
         )
       )
@@ -124,7 +125,7 @@ WORKSPACE_TABS <- list(
   Write = c("Draft", "Specification", "Traceability"),
   Model = c("Structure", "Flows", "Functional", "Interfaces", "Stakeholder"),
   Behavior = c("Scenarios", "State machines", "Behavioral impact"),
-  Analyze = c("Health", "Review queue", "Baselines & impact")
+  Analyze = c("Health", "Review queue", "Baselines & impact", "Documents")
 )
 TAB_SETS <- c(Write = "write_tab", Model = "model_tab", Behavior = "behavior_tab", Analyze = "analyze_tab")
 
@@ -238,6 +239,7 @@ app_server <- function(input, output, session) {
   mod_health_server("health", state)
   mod_review_server("review", state)
   mod_baselines_server("baselines", state)
+  mod_documents_server("documents", state)
   mod_stakeholder_server("stakeholder", state)
   mod_scenarios_server("scenarios", state)
   mod_machines_server("machines", state)

@@ -367,3 +367,15 @@ summary .shiny-text-output, .mb-tabbar .shiny-text-output { display: inline; }
 .mb-tabbar .control-label { margin: 0; white-space: nowrap; font-size: 13px; color: var(--ink-2); }
 .mb-tabbar .mb-grow .shiny-input-container { width: 100% !important; }
 .mb-tabbar .mb-grow select { flex: 1 1 auto; min-width: 0; }
+
+/* Analyze › Documents: the preview reads like the exported document. */
+.mb-doc { max-width: 880px; width: 100%; margin: 0 auto; padding: var(--space-5); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-sizing: border-box; overflow-wrap: anywhere; }
+.mb-doc .mb-doc-title { font-size: 22px; margin: 0 0 16px; }
+.mb-doc h1 { font-size: 18px; margin: 28px 0 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.mb-doc h2 { font-size: 15px; margin: 20px 0 6px; }
+.mb-doc h3 { font-size: 13px; margin: 14px 0 4px; color: var(--ink-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.mb-doc table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 4px 0 8px; display: block; overflow-x: auto; }
+.mb-doc th, .mb-doc td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; }
+.mb-doc th { background: var(--surface-muted); font-weight: 600; }
+.mb-doc ul { padding-left: 20px; margin: 4px 0; }
+.mb-doc .callout-warning, .mb-doc div[class*="callout"] { border-left: 3px solid var(--line-control); padding-left: 8px; }

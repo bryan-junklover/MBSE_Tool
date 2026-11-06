@@ -83,6 +83,16 @@ Anything that deletes asks first, and says what goes with it.
 - **Baselines & impact:** compare a baseline with the working copy, see what each
   change reaches, roll back (which first saves a safety baseline), and create the next
   baseline once nothing blocks it.
+- **Documents:** read-only documents for each group of readers. **Hardware** covers the
+  physical breakdown (with the software each part runs), interfaces, budgets and
+  properties. **Software** covers where each piece of software runs, the signals it
+  exchanges with their ranges, and state and transition tables. **Systems** has
+  everything, for reporting. Each ends with the open items in its part of the model.
+  Choose **From** to build one from a baseline instead of the working copy, then
+  export HTML or PDF. Export needs Quarto, like the ICD.
+
+In the Structure inspector, a software component has **Runs on** to record the hardware
+it runs on. Software with nothing recorded shows as a gap.
 
 ## Asking the model
 

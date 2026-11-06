@@ -76,14 +76,18 @@ behavior_edit <- function(state, code, label = "edit") {
 export_handler <- function(con, name, extension, writer) {
   shiny::downloadHandler(
     filename = function() sprintf("%s_%s.%s", gsub("[^A-Za-z0-9]+", "_", get_setting(con(), "project_name", "project")), name, extension),
-    content = function(file) {
-      outcome <- tryCatch(writer(con(), file), error = function(e) e)
-      if (inherits(outcome, "error")) {
-        refusal_toast(conditionMessage(outcome))
-        stop(conditionMessage(outcome))
-      }
-    }
+    content = export_content(con, writer)
   )
+}
+
+export_content <- function(con, writer) {
+  function(file) {
+    outcome <- tryCatch(writer(con(), file), error = function(e) e)
+    if (inherits(outcome, "error")) {
+      refusal_toast(conditionMessage(outcome))
+      stop(conditionMessage(outcome))
+    }
+  }
 }
 
 export_button <- function(id, label) shiny::downloadButton(id, label, class = "mb-btn mb-btn-small", icon = NULL)
