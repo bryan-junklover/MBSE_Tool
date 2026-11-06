@@ -77,7 +77,10 @@ Anything that deletes asks first, and says what goes with it.
   component that handles it. The Checks column lists failures still open and cases
   nobody has recorded: software receiving a signal from hardware with no "lost" case,
   power feeds, parts that draw power, and ranged fields. **Add … failure** starts one
-  from the check; **Doesn't apply…** sets a check aside with your reason.
+  from the check; **Doesn't apply…** sets a check aside with your reason. Under each
+  failure mode, its **effect chain** traces what it leads to through connectors, parts and
+  "runs on" links: what stops (→), what's handled (✓), and losses nobody has decided
+  about (⚠).
 - **Behavioral impact:** for a change since the last baseline, the scenarios it
   reaches, with the affected steps highlighted, before and after.
 
@@ -94,7 +97,8 @@ Anything that deletes asks first, and says what goes with it.
   physical breakdown (with the software each part runs), interfaces, budgets and
   properties. **Software** covers where each piece of software runs, the signals it
   exchanges with their ranges, and state and transition tables. **Systems** has
-  everything, for reporting. Each lists its failure modes (physical ones in Hardware) and
+  everything, for reporting. Each lists its failure modes (physical ones in Hardware) with
+  their effect chains, and
   ends with the open items in its part of the model.
   Choose **From** to build one from a baseline instead of the working copy, then
   export HTML or PDF. Export needs Quarto, like the ICD.

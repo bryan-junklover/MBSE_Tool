@@ -1,6 +1,6 @@
 # Stakeholder viewpoints and failure modes
 
-**Status:** agreed, 2026-11-06; steps 1–3 done · **Owner:** the systems engineer
+**Status:** agreed, 2026-11-06; steps 1–4 done · **Owner:** the systems engineer
 
 ## Why
 
@@ -135,8 +135,20 @@ Example: PowerBus28V `failed` → Flight computer `failed` → Navigation and Fl
 the Telemetry radio sees attitude data `lost` → handled by the `link_lost` transition to Return
 to home.
 
-Chains are computed when needed and never stored. They appear in the Systems inspector for a
-failure mode and in the Effect chains section of each document, cut to that viewpoint's scope.
+Chains are computed when needed and never stored. They appear under each failure mode on the
+Failure modes screen and in the Effect chains section of each document.
+
+As built:
+
+- **Parts:** a failed component also fails its own parts. So the flight controller failing
+  reaches FC Hardware, and from there the software that runs on it.
+- **What stops a chain:** losing power fails the receiver and the chain goes on. Losing data
+  or matter with nothing recorded is flagged, and the chain stops there.
+- **Outside the system:** where a chain reaches external equipment, it notes the loss and
+  stops.
+- **No cut to scope:** each document shows the chains for its failure modes in full, rather
+  than cut to the viewpoint's scope. A power failure that stops software is exactly what the
+  hardware reader needs to see.
 
 ## 5. AI sense check
 
@@ -158,7 +170,7 @@ Each step is useful by itself.
 3. *Done: Behavior › Failure modes, a Failures card on Health, and a section in each document.*
    **Failure modes:** table, links, inspector editing in the Systems view, checks, and the
    document section.
-4. **Effect chains.**
+4. **Effect chains.** *Done: under each failure mode, and an Effect chains section in each document.*
 5. **AI suggestions.**
 
 ## Out of scope for now

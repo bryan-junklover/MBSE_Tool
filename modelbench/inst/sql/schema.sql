@@ -604,13 +604,13 @@ CREATE TABLE IF NOT EXISTS viewpoint (
 INSERT OR REPLACE INTO viewpoint (id, name, stakeholder, concerns, rules_json, sort_order, is_builtin) VALUES
  ('VP-hardware', 'Hardware', 'Hardware engineers',
   'What each part is, what it weighs and draws, what plugs into what, which software runs on it, and how it can fail.',
-  '{"domains":["hw","hw_sw","other","unset"],"flow_types":["energy","matter","data"],"sections":["summary","breakdown","interfaces","budgets","failures","requirements","open_items"],"failure_causes":["lost","failed","degraded","open_circuit","short_circuit","over_temperature","mechanical"]}', 1, 1),
+  '{"domains":["hw","hw_sw","other","unset"],"flow_types":["energy","matter","data"],"sections":["summary","breakdown","interfaces","budgets","failures","effects","requirements","open_items"],"failure_causes":["lost","failed","degraded","open_circuit","short_circuit","over_temperature","mechanical"]}', 1, 1),
  ('VP-software', 'Software', 'Software engineers',
   'Where each piece of software runs, the signals it exchanges with their ranges, how its states respond to events, and what it does when things fail.',
-  '{"domains":["sw","hw_sw"],"flow_types":["data"],"sections":["summary","software","signals","states","failures","requirements","open_items"],"failure_causes":["lost","stale","out_of_range","erroneous","degraded","failed","other"]}', 2, 1),
+  '{"domains":["sw","hw_sw"],"flow_types":["data"],"sections":["summary","software","signals","states","failures","effects","requirements","open_items"],"failure_causes":["lost","stale","out_of_range","erroneous","degraded","failed","other"]}', 2, 1),
  ('VP-systems', 'Systems', 'Systems engineering and reporting',
   'The whole model in one document: structure, interfaces, budgets, software, behaviour, failures and open items.',
-  '{"domains":["hw","sw","hw_sw","other","unset"],"flow_types":["energy","matter","data"],"sections":["summary","breakdown","interfaces","budgets","software","signals","states","failures","requirements","open_items"]}', 3, 1);
+  '{"domains":["hw","sw","hw_sw","other","unset"],"flow_types":["energy","matter","data"],"sections":["summary","breakdown","interfaces","budgets","software","signals","states","failures","effects","requirements","open_items"]}', 3, 1);
 
 CREATE TABLE IF NOT EXISTS layout (
   view_id    TEXT NOT NULL REFERENCES view_def(id) ON DELETE CASCADE,

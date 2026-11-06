@@ -379,3 +379,7 @@ summary .shiny-text-output, .mb-tabbar .shiny-text-output { display: inline; }
 .mb-doc th { background: var(--surface-muted); font-weight: 600; }
 .mb-doc ul { padding-left: 20px; margin: 4px 0; }
 .mb-doc .callout-warning, .mb-doc div[class*="callout"] { border-left: 3px solid var(--line-control); padding-left: 8px; }
+
+/* Behavior › Failure modes: the effect chain. */
+.mb-chain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.mb-chain-step { line-height: 1.4; }

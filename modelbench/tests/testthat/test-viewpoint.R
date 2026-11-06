@@ -48,7 +48,7 @@ test_that("the software document shows hosts, signals with ranges and state tabl
   expect_match(signals, "## IF-002 · NavSolution", fixed = TRUE)
   expect_match(signals, "From Navigation Sensors to Flight Controller. Rate 50 Hz.", fixed = TRUE)
   expect_match(signals, "| heading_accuracy | float32 | deg | [to be decided] |", fixed = TRUE)
-  expect_no_match(md, "PowerBus28V")
+  expect_no_match(paste(section_of(md, "Software"), section_of(md, "Signals")), "PowerBus28V")
   expect_true(is.na(section_of(md, "Physical breakdown")))
   states <- section_of(md, "States and transitions")
   expect_match(states, "| Survey mission | gnss_lost | gnss_valid == false | 3 s | Return to home |", fixed = TRUE)
@@ -113,4 +113,15 @@ test_that("each document lists the failures in its scope, and the checks that la
   expect_match(section_of(software, "Open items"), "NavSolution.lat has a range", fixed = TRUE)
   expect_no_match(section_of(software, "Open items"), "overheats")
   expect_false(is.na(section_of(viewpoint_document(con, "VP-systems"), "Failure modes")))
+})
+
+test_that("each document traces the effect chains of its failures, in full", {
+  con <- local_built_sample()
+  hardware <- section_of(viewpoint_document(con, "VP-hardware"), "Effect chains")
+  expect_match(hardware, "## FM-0003 · Flight Controller.pwr_in lost", fixed = TRUE)
+  # The hardware reader sees the software their power failure stops.
+  expect_match(hardware, "Autopilot Software stops working, because it runs on FC Hardware.", fixed = TRUE)
+  software <- section_of(viewpoint_document(con, "VP-software"), "Effect chains")
+  expect_no_match(software, "FM-0004")
+  expect_match(software, "## FM-0001 · NavSolution.gnss_valid lost", fixed = TRUE)
 })

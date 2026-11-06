@@ -2,7 +2,7 @@
 # (docs/VIEWPOINTS_AND_FAILURES.md §2). A viewpoint names the domains and flow types it
 # covers and its sections in order; each section is a function that returns Markdown.
 
-VIEWPOINT_SECTIONS <- c("summary", "breakdown", "interfaces", "budgets", "software", "signals", "states", "failures", "requirements", "open_items")
+VIEWPOINT_SECTIONS <- c("summary", "breakdown", "interfaces", "budgets", "software", "signals", "states", "failures", "effects", "requirements", "open_items")
 
 viewpoint_list <- function(con) {
   DBI::dbGetQuery(con, "SELECT id, name, stakeholder, concerns, rules_json, is_builtin FROM viewpoint ORDER BY sort_order, name")
@@ -207,6 +207,21 @@ viewpoint_section_failures <- function(con, viewpoint, scope, source) {
                  md_table(c("ID", "What fails", "Cause", "Effect", "Detected by", "Response"),
                           data.frame(modes$id, modes$subject, unname(cause), join(modes$local_effect, modes$system_effect), or_dash(modes$detected_by), response)))
   doc_section("Failure modes", body)
+}
+
+# What each failure in the viewpoint leads to. Chains are shown whole: a power loss that
+# stops software is exactly what a hardware reader needs to see.
+viewpoint_section_effects <- function(con, viewpoint, scope, source) {
+  modes <- viewpoint_failures(con, viewpoint, scope)
+  modes <- modes[modes$subject_kind != "sm_state", , drop = FALSE]
+  if (nrow(modes) == 0L) return(doc_section("Effect chains", "_None recorded in this part of the model._"))
+  model <- effect_model(con)
+  parts <- vapply(seq_len(nrow(modes)), function(i) {
+    chain <- effect_chain(con, modes$id[i], model)
+    sprintf("## %s · %s %s\n\n%s\n", modes$id[i], modes$subject[i], tolower(FAILURE_CAUSES[[modes$cause_kind[i]]]), effect_chain_markdown(chain))
+  }, "")
+  doc_section("Effect chains", paste0("Worked out from the model: → follows on, ✓ is handled or accepted, ⚠ is a loss nobody has decided about.\n\n",
+                                      paste(parts, collapse = "\n")))
 }
 
 # Failure checks that land inside a viewpoint.

@@ -7,6 +7,11 @@ test_that("the failure modes screen adds, edits, links and deletes", {
     html <- as.character(output$editor$html)
     expect_match(html, "Return to home on inertial navigation after 3 s", fixed = TRUE)
     expect_match(html, "Flight modes: Survey mission → gnss_lost → Return to home", fixed = TRUE)
+    expect_match(html, "Effect chain", fixed = TRUE)
+    session$setInputs(select = "FM-0003")
+    html <- as.character(output$editor$html)
+    expect_match(html, "Stops: Flight Controller, FC Hardware, Autopilot Software.", fixed = TRUE)
+    expect_match(html, "padding-left:36px", fixed = TRUE)
 
     session$setInputs(add_new = list(value = "element|C-006", n = 1))
     id <- selected()

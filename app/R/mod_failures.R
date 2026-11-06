@@ -139,6 +139,27 @@ render_failure_checks <- function(findings, waivers, ns) {
   }), set_aside)
 }
 
+# What the failure leads to, traced through connectors, parts and "runs on" links.
+render_effect_chain <- function(chain, element_names) {
+  summary <- effect_summary(chain)
+  marks <- c(handled = "✓", accepted = "✓", open = "⚠", unrecorded = "⚠", propagates = "→", reaches = "→")
+  shiny::tags$section(
+    class = "mb-inspector", style = "max-width:720px", `aria-label` = "Effect chain",
+    shiny::tags$div(class = "mb-head", shiny::tags$b("Effect chain"), shiny::tags$span(class = "mb-caption", "worked out from the model · every edit")),
+    shiny::tags$span(class = "mb-caption",
+                     paste(c(if (length(summary$stopped) > 0L) sprintf("Stops: %s.", paste(element_names[summary$stopped], collapse = ", ")),
+                             if (summary$open > 0L) sprintf("%d loss%s nobody has decided about.", summary$open, if (summary$open == 1L) "" else "es"),
+                             if (summary$handled > 0L) sprintf("%d handled.", summary$handled)), collapse = " ")),
+    if (nrow(chain) == 0L) shiny::tags$span(class = "mb-caption", "Nothing else is affected."),
+    shiny::tags$ul(class = "mb-chain", lapply(seq_len(nrow(chain)), function(i) {
+      row <- chain[i, ]
+      shiny::tags$li(class = paste("mb-chain-step", if (row$status %in% c("open", "unrecorded")) "mb-gap"),
+                     style = sprintf("padding-left:%dpx", 18L * row$depth),
+                     shiny::tags$span(`aria-hidden` = "true", class = "mono", marks[[row$status]]), " ", row$text)
+    }))
+  )
+}
+
 mod_failures_server <- function(id, state) {
   shiny::moduleServer(id, function(input, output, session) {
     ns <- session$ns
@@ -186,8 +207,10 @@ mod_failures_server <- function(id, state) {
       }
       row <- all[all$id == id, , drop = FALSE]
       fields <- if (row$subject_kind == "interface") interface_fields(con(), row$subject_id)$name else character(0)
-      render_failure_editor(row, subjects(), fields, failure_links(con(), id),
-                            failure_link_choices(con(), "detected_by"), failure_link_choices(con(), "handled_by"), ns)
+      elements <- DBI::dbGetQuery(con(), "SELECT id, name FROM element")
+      shiny::tagList(render_failure_editor(row, subjects(), fields, failure_links(con(), id),
+                                           failure_link_choices(con(), "detected_by"), failure_link_choices(con(), "handled_by"), ns),
+                     render_effect_chain(effect_chain(con(), id), stats::setNames(elements$name, elements$id)))
     })
 
     shiny::observeEvent(input$select, selected(input$select))
