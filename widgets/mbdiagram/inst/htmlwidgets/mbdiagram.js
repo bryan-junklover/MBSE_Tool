@@ -634,9 +634,34 @@ HTMLWidgets.widget({
       holder.scrollTop = Math.max(0, (y0 + y1) / 2 - holder.clientHeight / 2);
     }
     // An inspector opening over the canvas keeps the selection in sight (UX re-review P2.1).
-    document.addEventListener("mb:overlay", function () {
-      if (el.isConnected && selected.length === 1) reveal(selected[0]);
-    });
+    // The view from before the first reveal is kept, and put back when the overlay closes, since
+    // a closing overlay frees no layout space and so fires no resize (UX re-review N1).
+    var overlayView = null;
+    function onOverlay(evt) {
+      if (!el.isConnected) {
+        document.removeEventListener("mb:overlay", onOverlay);
+        document.removeEventListener("mb:overlay-closed", onOverlay);
+        return;
+      }
+      if (evt.type === "mb:overlay") {
+        if (selected.length !== 1) return;
+        if (!overlayView) overlayView = { fitted: fitted, scale: scale, left: holder.scrollLeft, top: holder.scrollTop };
+        reveal(selected[0]);
+        return;
+      }
+      var view = overlayView;
+      overlayView = null;
+      if (!view) return;
+      // Shrink the widened paper first, so its scrollbars are gone before Fit measures the view.
+      frame(false);
+      if (fitted && view.fitted) { fitAll(false); return; }
+      if (Math.abs(scale - view.scale) < 0.001) {
+        holder.scrollLeft = view.left;
+        holder.scrollTop = view.top;
+      }
+    }
+    document.addEventListener("mb:overlay", onOverlay);
+    document.addEventListener("mb:overlay-closed", onOverlay);
     function paperWidth(x) { return Math.max(el.clientWidth || 600, 500); }
     // A stub runs a short way off its block, towards the view's edge.
     function placeStubs(links) {

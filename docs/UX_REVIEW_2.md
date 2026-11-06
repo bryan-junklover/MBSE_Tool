@@ -78,6 +78,56 @@ All nine were fixed after R1–R3; `mbdiagram` is 0.1.7.
 8. **Baselines "Compare" select truncates** to "BL-03 · Baselin". Let it size to its content (`width: auto`), or show only the id with the name in its `title`. — **Fixed**: both selects size to their content ("BL-03 · Baseline 3" shows in full).
 9. **4.6 is still open:** there's no shinytest2 check for horizontal scroll at 900px. My manual sweep found none on all 15 screens, but nothing guards it in CI. — **Fixed**: `app/tests/testthat/test-layout.R` drives the app in headless Chrome (shinytest2), clicks through all 15 screens at 900×800 and fails on any sideways scroll. `MODELBENCH_SKIP_BROWSER_TESTS=true` leaves it out.
 
+## Third pass: the P2 fixes (d02ec9d, 1d6fddc)
+
+**Method:**
+- Ran `mbdiagram` 0.1.16, checking that the browser loaded `mbdiagram-binding-0.1.16`.
+- Checked each item at 1440×900, 1024×768 and 900×800.
+- Ran `tools/run_tests.R`, which includes the new `test-layout.R` sweep, and `tools/lint.R`.
+- Rebuilt the 150-block, 200-link stress model in the page.
+
+**Verdict:** all nine P2 items pass their "done when". Tests and lint pass. There's one new P2 problem (N1), plus a few small notes.
+
+| Item | Result |
+|---|---|
+| P2.1 overlay | At 900×800, selecting Ground Control Software opens the inspector with the block in the free part of the canvas |
+| P2.2 splitter | Focusable; `aria-valuenow/min/max` are set. → +16, ⇧→ +64, Home 180, End 680 all work. The button is 24×32 and shows at 40% at rest; there's a blue bar on focus |
+| P2.3 Specification | With the inspector open, the table is 769px in a 769px box with no sideways scroll; Score shows in full |
+| P2.4 outline | The column is 280px; none of the 13 titles is cut |
+| P2.5 gate | No `.mb-hard` line; the header verdict, the ledger rows and the Commit bar remain |
+| P2.6 top bar | 57px tall at both 1024 and 900, and the context ends in "…" |
+| P2.7 connectors | On Structure, no link crosses a block and no labels overlap. The only shared run is N4 |
+| P2.8 Baselines | "BL-03 · Baseline 3" shows in full (157px) |
+| P2.9 layout test | Passes (17 expectations) |
+| R3 still holds | State machines fits at 0.70 |
+| Performance | 150 blocks and 200 links render in 713 ms, under 1 s (613 ms before). A drag step takes a median of 0.4 ms. Each drop re-routes every link, which takes about 230 ms (N3) |
+
+### N1 (P2) Closing the narrow overlay leaves the canvas shifted — **Fixed**: `apply()` now sends `mb:overlay-closed`. The widget keeps the view from before the first reveal, shrinks the paper back, then re-fits or restores the scroll. At 900×800 the fitted view returns exactly (810px paper, scroll 0, 58%), and so does a zoomed one (84%, scroll 0/60). One self-removing listener per widget also covers N5. `mbdiagram` is 0.1.18.
+- **Evidence:** at 900×800, select Ground Control Software, then click empty canvas.
+  - The overlay closes, but the paper stays widened to 1040px and scrolled 230px right.
+  - Power System and Flight Termination Unit are cut off on the left, and there's empty space on the right.
+  - The zoom still says 58%, and only Fit brings the diagram back.
+- **Cause:** `reveal()` widens the paper and scrolls it when the overlay opens. Nothing undoes that on close, and a closing overlay doesn't resize the holder, so `resize` → `fitAll` never runs.
+- **Fix:** when `apply()` closes an overlay, send `mb:overlay-closed`. Have the widget save its scroll position (and whether it was fitted) when it handles `mb:overlay`, then restore it on close: `fitAll(false)` if it was fitted, otherwise put the scroll and paper width back.
+- **Done when:** at 900×800, opening and closing the inspector leaves the diagram exactly as it was.
+
+### Smaller notes (P3)
+- **N2 Specification's Requirement column is now the squeeze point.**
+  - At 1440 with the inspector open, Requirement is 199px and most rows wrap to 3–4 lines, so about 9 rows fit on screen.
+  - Status (90px), Type (100px) and Allocated to (121px) have room to spare.
+  - Narrow those instead: Type 84, Status 76, Allocated to with `minWidth = 90`. Then put Requirement back to about 220px.
+- **N3 Each drop re-routes every link.**
+  - `element:pointerup` → `separateChannels()` clears and re-routes all `mbCached` links. That takes about 230 ms at 200 links, which shows as a short hitch on release.
+  - Fine at the sample's size. If larger models stutter, re-route only links whose bounding box meets the moved block's old or new box, plus their channel mates.
+- **N4 Two boundary stubs share one run.** On Structure, `thrust` (K-0011) and `air` (K-0012) leave Propulsion and meet the same boundary point (650, 908), so the last 40px looks like one line. Give stubs to the same boundary point a small x offset.
+- **N5 The `mb:overlay` listener is never removed.** — **Fixed with N1.**
+  - Each widget instance adds a listener on `document`. The `el.isConnected` guard keeps it harmless, but listeners pile up as the diagram outputs re-render.
+  - Remove it when the element goes, or use one shared listener that walks `mbdiagramDebug`.
+- **N6 The splitter's End key always goes to 680px.**
+  - At 1024 wide, End on both side columns would leave the canvas very narrow.
+  - Cap the maximum at what keeps the main column at least ~400px, and set `aria-valuemax` to match.
+- **N7 The mod_ai tests print an unhandled promise error.** It reads "Can't access reactive `ExtendedTask$private$status`; its module session has been destroyed" and appears twice. The tests still pass, but the noise hides real failures. Wait for or cancel the task before the test session ends.
+
 ## Suggested order
 
 R1 → R2 → R3, then P2 items 1–3 (behaviour and accessibility), then 4–9. After R3, re-run handoff §8 items 9, 10 and 16. Each widget change needs a bump of the `mbdiagram` version.

@@ -63,7 +63,11 @@ function mbToggleChat(open) {
     col.mbRail.setAttribute("aria-expanded", String(!closed));
     col.mbSplit.hidden = closed || nar;
     col.mbSplit.setAttribute("aria-valuenow", String(col.mbWidth));
-    if (nar && !closed) document.dispatchEvent(new Event("mb:overlay"));
+    // Diagrams under the overlay keep the selection in sight, and get their view back on close.
+    var overlaid = nar && !closed;
+    if (overlaid) document.dispatchEvent(new Event("mb:overlay"));
+    else if (col.mbOverlaid) document.dispatchEvent(new Event("mb:overlay-closed"));
+    col.mbOverlaid = overlaid;
   }
   function remember(col) { save(col.dataset.col, { w: col.mbWidth, closed: col.dataset.auto ? undefined : col.mbClosed }); }
   function setWidth(col, width) {
