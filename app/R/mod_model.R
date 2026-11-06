@@ -12,7 +12,7 @@ TOOL_HINTS <- c(select = "Drag port to port to connect · double-click a compone
 
 MODE_TOOLS <- list(
   structure = DIAGRAM_TOOLS,
-  flows = c("Select" = "select"),
+  flows = c("Select" = "select", "Outside equipment" = "component", "Port" = "port", "Connect" = "connect"),
   functional = c("Select" = "select", "Function" = "component", "Port" = "port", "Connect" = "connect")
 )
 
@@ -361,7 +361,11 @@ mod_model_server <- function(id, state, mode = "structure") {
       }))
     })
     output$hint <- shiny::renderText({
-      if (mode == "flows") return("Select a block or connector to see its details.")
+      if (mode == "flows") {
+        return(switch(tool(), select = "Select a block or connector to see its details",
+                      component = "Click the canvas to add outside equipment: something beyond the system boundary, such as an operator or a base station",
+                      TOOL_HINTS[[tool()]]))
+      }
       if (mode == "functional") {
         return(switch(tool(), select = "Drag port to port to connect", component = "Click the canvas to add a function", TOOL_HINTS[[tool()]]))
       }
@@ -445,7 +449,10 @@ mod_model_server <- function(id, state, mode = "structure") {
           if (is.null(written)) redraw(redraw() + 1L)
         },
         add_component = {
-          fields <- if (mode == "functional") list(kind = "function", name = "New function") else list(kind = "component", name = "New component", parent_id = current_root())
+          fields <- switch(mode,
+                           functional = list(kind = "function", name = "New function"),
+                           flows = list(kind = "external", name = "New outside equipment"),
+                           list(kind = "component", name = "New component", parent_id = current_root()))
           written <- model_edit(state, write_element(con(), fields = fields), "add component")
           if (!is.null(written)) {
             save_layout(con(), view_id(), layout_items(data.frame(id = written$id, x = event$x, y = event$y)))

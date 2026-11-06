@@ -4,11 +4,13 @@
 mod_failures_ui <- function(id, tabs = NULL) {
   ns <- shiny::NS(id)
   shiny::tagList(
-    screen_bar(tabs, actions = shiny::uiOutput(ns("add"), inline = TRUE)),
+    screen_bar(tabs, actions = shiny::tagList(shiny::uiOutput(ns("suggest_status"), inline = TRUE),
+                                              shiny::actionButton(ns("suggest"), "Suggest with AI", class = "mb-btn mb-btn-ai"),
+                                              shiny::uiOutput(ns("add"), inline = TRUE))),
     shiny::tags$div(class = "mb-body",
                     side_column("left", "failures.list", "Failure modes", width = 300, shiny::uiOutput(ns("list"))),
                     shiny::tags$main(class = "mb-main", shiny::uiOutput(ns("editor"))),
-                    side_column("right", "failures.checks", "Checks", width = 340, shiny::uiOutput(ns("checks"))))
+                    side_column("right", "failures.checks", "Checks", width = 340, shiny::uiOutput(ns("suggestions")), shiny::uiOutput(ns("checks"))))
   )
 }
 
@@ -66,7 +68,15 @@ render_failure_editor <- function(row, subjects, fields, links, detect_choices, 
     class = "mb-inspector", style = "max-width:720px",
     shiny::tags$div(class = "mono mb-caption", row$id),
     if (row$review_state == "unreviewed") {
-      shiny::tags$div(class = "mb-head", shiny::tags$span(class = "mb-badge-ai", "AI"), shiny::tags$b("Unreviewed AI suggestion"))
+      shiny::tags$section(
+        class = "mb-sketch-panel",
+        shiny::tags$div(class = "mb-head", shiny::tags$span(class = "mb-badge-ai", "AI"), shiny::tags$b("Unreviewed AI suggestion")),
+        shiny::tags$span("The AI suggested this failure. Say in your own words why it's real, then decide the response."),
+        shiny::tags$textarea(id = ns("review_note"), rows = 2, `aria-label` = "Why it's real"),
+        shiny::tags$button(type = "button", class = "mb-btn",
+                           onclick = sprintf("Shiny.setInputValue('%s', {note: document.getElementById('%s').value, n: Math.random()}, {priority: 'event'})",
+                                             ns("review"), ns("review_note")), "Review, with my note")
+      )
     },
     labelled("What fails", select_tag(stats::setNames(subjects$value, subjects$label), paste(row$subject_kind, row$subject_id, sep = "|"),
                                       field("subject"), label = "What fails")),
@@ -237,6 +247,60 @@ mod_failures_server <- function(id, state) {
       model_edit(state, waive_failure_check(con(), waive$rule, waive$kind, waive$id, waive$note), "set check aside")
     })
     shiny::observeEvent(input$unwaive, model_edit(state, delete_entity(con(), "failure_waiver", input$unwaive), "check again"))
-    invisible(list(selected = selected, findings = findings))
+    # --- AI suggestions (doc §5): kept ones become unreviewed failure modes ---
+    suggest_task <- shiny::ExtendedTask$new(function(connection) run_failure_suggest_async(connection))
+    suggest_message <- shiny::reactiveVal(NULL)
+    pending_dismiss <- shiny::reactiveVal(NULL)
+    suggestions <- shiny::reactive({
+      refresh()
+      db_dep(state, "ai")
+      rows <- proposal_list(con(), "open", "ai")
+      rows[rows$proposal_kind == "sketch_failure", , drop = FALSE]
+    })
+    output$suggestions <- shiny::renderUI({
+      rows <- suggestions()
+      if (nrow(rows) == 0L) return(NULL)
+      shiny::tags$div(class = "mb-list-group", shiny::tags$div(class = "mb-label", sprintf("AI suggestions (%d)", nrow(rows))),
+                      lapply(seq_len(nrow(rows)), function(i) render_proposal_card(rows[i, ], ns)))
+    })
+    shiny::observeEvent(input$suggest, {
+      suggest_message(NULL)
+      suggest_task$invoke(con())
+    })
+    shiny::observeEvent(suggest_task$result(), {
+      result <- suggest_task$result()
+      count <- length(result$proposal_ids)
+      suggest_message(if (isTRUE(result$ok)) sprintf("%d new suggestion%s.", count, if (count == 1L) "" else "s") else result$error)
+      invalidate_db(state, "ai")
+    })
+    output$suggest_status <- shiny::renderUI({
+      if (suggest_task$status() == "running") return(shiny::tags$span(class = "mb-caption", "Thinking about failures…"))
+      if (!is.null(suggest_message())) shiny::tags$span(class = "mb-caption", suggest_message())
+    })
+    shiny::observeEvent(input$keep, {
+      written <- guarded_edit(keep_sketch(con(), input$keep$id, input$keep$note))
+      if (is.null(written)) return()
+      state$commands(push_command(state$commands(), change_command(written$change_set, "add failure suggestion")))
+      invalidate_db(state, c("ai", "model"))
+      selected(written$id)
+    })
+    shiny::observeEvent(input$dismiss, {
+      pending_dismiss(input$dismiss)
+      ask_dismiss(ns, input$dismiss, "dismiss_confirm", "dismiss_reason")
+    })
+    shiny::observeEvent(input$dismiss_confirm, {
+      done <- guarded_edit({
+        dismiss_proposal(con(), pending_dismiss(), input$dismiss_reason)
+        TRUE
+      })
+      if (is.null(done)) return()
+      shiny::removeModal()
+      invalidate_db(state, "ai")
+    })
+    shiny::observeEvent(input$see_call, show_llm_call(con(), input$see_call))
+    shiny::observeEvent(input$review, {
+      model_edit(state, review_entity(con(), "failure_mode", selected(), input$review$note), "review failure mode")
+    })
+    invisible(list(selected = selected, findings = findings, suggestions = suggestions))
   })
 }

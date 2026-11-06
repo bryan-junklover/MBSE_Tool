@@ -81,11 +81,42 @@ test_that("migration 003 lets a version 2 project link failure modes", {
 
   con <- init_project_db(path)
   on.exit(DBI::dbDisconnect(con))
-  expect_identical(schema_version(con), 3L)
+  expect_identical(schema_version(con), latest_version())
   expect_identical(DBI::dbGetQuery(con, "SELECT id FROM link")$id, "L-0002")
   expect_no_error(DBI::dbExecute(con, "INSERT INTO link (id, link_type, source_kind, source_id, target_kind, target_id)
                                        VALUES ('L-0001', 'detected_by', 'failure_mode', 'FM-0001', 'sm_event', 'E-01')"))
   expect_identical(DBI::dbGetQuery(con, "PRAGMA integrity_check")$integrity_check, "ok")
+})
+
+test_that("migration 004 rebuilds proposals and routes, keeping links that point at a proposal", {
+  path <- withr::local_tempfile(fileext = ".sqlite")
+  con <- build_sample_project(path)
+  id <- insert_proposal(con, list(task = "trace_coach", proposal_kind = "candidate_link", title = "Which?", payload_json = "{}"))
+  DBI::dbExecute(con, "INSERT INTO link (id, link_type, source_kind, source_id, target_kind, target_id, rationale, origin, ai_proposal_id)
+                       VALUES ('L-0900', 'satisfied_by', 'requirement', 'SYS-002', 'element', 'C-001', 'From the coach', 'ai_candidate', ?)", params = list(id))
+  proposals <- DBI::dbGetQuery(con, "SELECT * FROM ai_proposal ORDER BY id")
+  DBI::dbExecute(con, "DELETE FROM task_route WHERE task = 'failure_suggest'")
+  DBI::dbExecute(con, "UPDATE project_meta SET value = '3' WHERE key = 'schema_version'")
+  DBI::dbDisconnect(con)
+
+  con <- init_project_db(path)
+  on.exit(DBI::dbDisconnect(con))
+  expect_identical(schema_version(con), 4L)
+  expect_identical(DBI::dbGetQuery(con, "SELECT * FROM ai_proposal ORDER BY id"), proposals)
+  expect_identical(DBI::dbGetQuery(con, "SELECT ai_proposal_id FROM link WHERE id = 'L-0900'")$ai_proposal_id, id)
+  expect_true("failure_suggest" %in% routes_table(con)$task)
+  expect_identical(DBI::dbGetQuery(con, "PRAGMA foreign_keys")$foreign_keys, 1L)
+  expect_identical(nrow(DBI::dbGetQuery(con, "PRAGMA foreign_key_check")), 0L)
+  expect_match(DBI::dbGetQuery(con, "SELECT sql FROM sqlite_master WHERE name = 'v_unreviewed'")$sql, "failure_mode", fixed = TRUE)
+})
+
+test_that("a migration that leaves a broken reference rolls back, with foreign keys back on", {
+  con <- local_project()
+  dir <- withr::local_tempdir()
+  writeLines("INSERT INTO llm_cache (task, key_hash, llm_call_id) VALUES ('t', 'k', 999);", file.path(dir, sprintf("%03d_dangling.sql", latest_version() + 1L)))
+  expect_error(run_migrations(con, dir), "1 broken reference, in llm_cache")
+  expect_identical(schema_version(con), latest_version())
+  expect_identical(DBI::dbGetQuery(con, "PRAGMA foreign_keys")$foreign_keys, 1L)
 })
 
 test_that("every revisioned kind has a rev column and a known id scheme", {

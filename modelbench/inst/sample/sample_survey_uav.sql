@@ -12,7 +12,8 @@ INSERT INTO project_meta (key, value) VALUES
  ('scope_text','A battery-powered quadcopter that flies a pre-planned route and photographs an area for mapping, operated from a ground laptop over radio.'),
  ('coaching_policy','tiered'), ('local_only','0'), ('coach_wait_ms','2000');
 
-INSERT INTO unit (symbol, quantity, si_symbol, si_factor, si_offset) VALUES
+-- The schema seeds these too; OR IGNORE keeps the sample loading on top of it.
+INSERT OR IGNORE INTO unit (symbol, quantity, si_symbol, si_factor, si_offset) VALUES
  ('kg','mass','kg',1,0), ('g','mass','kg',0.001,0),
  ('W','power','W',1,0), ('V','voltage','V',1,0), ('A','current','A',1,0),
  ('mAh','charge','C',3.6,0), ('Wh','energy','J',3600,0),

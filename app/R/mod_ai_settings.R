@@ -2,11 +2,13 @@
 
 TASK_LABELS <- c(req_light_check = "Requirement light check", req_deep_check = "Requirement deep check", scope_gaps = "Gaps the scope implies",
                  trace_coach = "Trace coach", gap_inference = "Gap inference", allocation_coach = "Allocation coach", impact_narrative = "Change impact narrative",
-                 behavior_sketch = "Behavior sketch", behavior_analysis = "Behavior analysis", stakeholder_summary = "Stakeholder summaries", model_chat = "Model Q&A chat")
+                 behavior_sketch = "Behavior sketch", behavior_analysis = "Behavior analysis", stakeholder_summary = "Stakeholder summaries", model_chat = "Model Q&A chat",
+                 failure_suggest = "Failure suggestions")
 TASK_SENDS <- c(req_light_check = "one requirement, its parent, related requirements", req_deep_check = "one requirement, up to 40 related, the scope", scope_gaps = "scope, model names, committed requirements",
                 trace_coach = "one requirement and numbered candidates", gap_inference = "scope, model names, committed requirements", allocation_coach = "one function and numbered candidates",
                 impact_narrative = "the diff and impact set", behavior_sketch = "a description and model names", behavior_analysis = "a scenario and its interfaces",
-                stakeholder_summary = "view contents", model_chat = "what it asks for through tools")
+                stakeholder_summary = "view contents", model_chat = "what it asks for through tools",
+                failure_suggest = "scope, model names, connections and recorded failures")
 
 POLICY_ROWS <- list(
   c("Requirement wording", "Ask questions; show example rewrites, folded, as word diffs", "Every word committed", "No way to apply a rewrite; the gate re-checks every commit"),

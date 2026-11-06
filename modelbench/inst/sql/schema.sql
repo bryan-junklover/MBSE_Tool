@@ -42,6 +42,27 @@ CREATE TABLE IF NOT EXISTS unit (
   si_offset REAL NOT NULL DEFAULT 0
 );
 
+-- A standard unit registry, in every project. Engineers add their own in Project › Units
+-- & properties. A unit converts to SI as value * si_factor + si_offset.
+INSERT OR IGNORE INTO unit (symbol, quantity, si_symbol, si_factor, si_offset) VALUES
+ ('kg','mass','kg',1,0), ('g','mass','kg',0.001,0), ('t','mass','kg',1000,0),
+ ('W','power','W',1,0), ('mW','power','W',0.001,0), ('kW','power','W',1000,0),
+ ('V','voltage','V',1,0), ('mV','voltage','V',0.001,0), ('kV','voltage','V',1000,0),
+ ('A','current','A',1,0), ('mA','current','A',0.001,0),
+ ('mAh','charge','C',3.6,0), ('Ah','charge','C',3600,0), ('C','charge','C',1,0),
+ ('J','energy','J',1,0), ('kJ','energy','J',1000,0), ('Wh','energy','J',3600,0), ('kWh','energy','J',3600000,0),
+ ('s','time','s',1,0), ('ms','time','s',0.001,0), ('µs','time','s',0.000001,0), ('min','time','s',60,0), ('h','time','s',3600,0), ('d','time','s',86400,0),
+ ('Hz','frequency','Hz',1,0), ('kHz','frequency','Hz',1000,0), ('MHz','frequency','Hz',1000000,0), ('GHz','frequency','Hz',1000000000,0),
+ ('m','length','m',1,0), ('mm','length','m',0.001,0), ('cm','length','m',0.01,0), ('km','length','m',1000,0),
+ ('m2','area','m2',1,0), ('km2','area','m2',1000000,0), ('L','volume','m3',0.001,0), ('m3','volume','m3',1,0),
+ ('m/s','speed','m/s',1,0), ('km/h','speed','m/s',0.277777777777778,0), ('m/s2','acceleration','m/s2',1,0),
+ ('deg','angle','rad',0.0174532925199433,0), ('rad','angle','rad',1,0), ('rpm','rotation rate','rad/s',0.10471975511966,0),
+ ('°C','temperature','K',1,273.15), ('K','temperature','K',1,0),
+ ('N','force','N',1,0), ('Nm','torque','Nm',1,0), ('Pa','pressure','Pa',1,0), ('kPa','pressure','Pa',1000,0), ('bar','pressure','Pa',100000,0),
+ ('%','ratio','1',0.01,0), ('dB','level','dB',1,0), ('dBm','power level','dBm',1,0),
+ ('bit/s','data rate','bit/s',1,0), ('kbit/s','data rate','bit/s',1000,0), ('Mbit/s','data rate','bit/s',1000000,0),
+ ('B','data size','B',1,0), ('kB','data size','B',1000,0), ('MB','data size','B',1000000,0), ('GB','data size','B',1000000000,0);
+
 CREATE TABLE IF NOT EXISTS glossary (
   term       TEXT PRIMARY KEY COLLATE NOCASE,
   definition TEXT,
@@ -678,7 +699,7 @@ CREATE TABLE IF NOT EXISTS task_route (
   task                 TEXT PRIMARY KEY CHECK (task IN (
                          'req_light_check','req_deep_check','scope_gaps','trace_coach',
                          'gap_inference','allocation_coach','impact_narrative',
-                         'behavior_sketch','behavior_analysis','stakeholder_summary','model_chat')),
+                         'behavior_sketch','behavior_analysis','stakeholder_summary','model_chat','failure_suggest')),
   trigger_mode         TEXT NOT NULL CHECK (trigger_mode IN ('every_edit','on_demand','when_asked')),
   provider_id          TEXT REFERENCES provider(id),
   model                TEXT,
@@ -704,6 +725,7 @@ INSERT OR IGNORE INTO task_route (task, trigger_mode, provider_id, model, fallba
  ('behavior_analysis', 'on_demand', 'anthropic', 'claude-sonnet-5-5', 'openai', 'gpt-5.6-luna'),
  ('stakeholder_summary', 'on_demand', 'openai', 'gpt-5.6-luna', 'lmstudio', NULL),
  ('model_chat', 'when_asked', 'anthropic', 'claude-haiku-5-5', 'lmstudio', NULL);
+-- failure_suggest is seeded by migration 004, which first lets task_route hold it.
 
 CREATE TABLE IF NOT EXISTS llm_call (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -745,7 +767,7 @@ CREATE TABLE IF NOT EXISTS ai_proposal (
   task                TEXT NOT NULL,
   proposal_kind       TEXT NOT NULL CHECK (proposal_kind IN (
                         'question','candidate_link','sketch_element','sketch_function',
-                        'sketch_step','sketch_requirement','example_rewrite','gap')),
+                        'sketch_step','sketch_requirement','example_rewrite','gap','sketch_failure')),
   source              TEXT NOT NULL DEFAULT 'ai' CHECK (source IN ('ai','structural')),  -- structural = code check
   target_kind         TEXT,
   target_id           TEXT,
@@ -826,7 +848,8 @@ CREATE VIEW IF NOT EXISTS v_unreviewed AS
   UNION ALL SELECT 'seq_step',      id, label FROM seq_step      WHERE review_state = 'unreviewed'
   UNION ALL SELECT 'act_node',      id, coalesce(label, id) FROM act_node WHERE review_state = 'unreviewed'
   UNION ALL SELECT 'sm_state',      id, name  FROM sm_state      WHERE review_state = 'unreviewed'
-  UNION ALL SELECT 'sm_transition', id, id    FROM sm_transition WHERE review_state = 'unreviewed';
+  UNION ALL SELECT 'sm_transition', id, id    FROM sm_transition WHERE review_state = 'unreviewed'
+  UNION ALL SELECT 'failure_mode',  id, id    FROM failure_mode  WHERE review_state = 'unreviewed';
 
 -- Event/state pairs that need a transition or an explicit ignore.
 CREATE VIEW IF NOT EXISTS v_sm_unhandled AS

@@ -113,6 +113,12 @@ update_failure_mode <- function(con, failure_id, field, value, author = "enginee
     if (length(parts) != 2L) refuse("Choose what fails.")
     return(write_entity(con, "failure_mode", failure_id, list(subject_kind = parts[1], subject_id = parts[2], field_name = NA_character_), author))
   }
+  if (field == "response_state" && !identical(value, "placeholder")) {
+    row <- read_entity(con, "failure_mode", failure_id)
+    if (identical(row$origin, "ai") && identical(row$review_state, "unreviewed")) {
+      refuse("Review this AI suggestion first, with your note. Then decide its response.")
+    }
+  }
   if (field == "response_state" && identical(value, "accepted")) {
     note <- read_entity(con, "failure_mode", failure_id)$response_note
     if (is.null(note) || is.na(note) || !nzchar(trimws(note))) refuse("Say why it's accepted first, in the note under Response.")

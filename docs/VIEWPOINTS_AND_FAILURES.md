@@ -1,6 +1,6 @@
 # Stakeholder viewpoints and failure modes
 
-**Status:** agreed, 2026-11-06; steps 1–4 done · **Owner:** the systems engineer
+**Status:** agreed, 2026-11-06; all five steps done · **Owner:** the systems engineer
 
 ## Why
 
@@ -155,8 +155,18 @@ As built:
 - **New task route `failure_suggest`.** It is given the element types, interfaces, mission text
   and existing failure modes, and asks what's missing. Examples: "GNSS can be degraded as well as
   lost"; "nothing records an intermittent radio link".
-- Suggestions arrive as unreviewed `failure_mode` rows through `ai_proposal`, with `response_state =
-  'placeholder'`. The AI can draft a cause and effect, but never a response and never `handled`.
+- Suggestions arrive as `sketch_failure` proposals. Keeping one, with a note, makes an unreviewed
+  AI `failure_mode` with `response_state = 'placeholder'`. Reviewing it, with a second note,
+  makes it part of the model, as for every AI draft.
+- The AI can draft a cause and effects, but never a response and never `handled`. The database
+  refuses a response on an unreviewed AI failure, and the app says to review it first.
+- **What it's sent:** the scope, model names as numbered handles (never ids), which part
+  belongs to which, the connections, what runs on what, and the failures already recorded.
+- **What's dropped:** suggestions that repeat a recorded or open one, or name a handle that
+  doesn't exist. Any number the AI writes becomes `[value]`.
+- **Migration 004** rebuilds `task_route` and `ai_proposal` to allow the new task and kind.
+  `run_migrations` now turns foreign keys off while each migration runs, and checks every
+  reference before it commits.
 - **The checks in §3 find gaps in what was recorded; the AI looks for what nobody thought of.**
   Both show in the review queue, labelled so they can be told apart.
 
@@ -171,7 +181,7 @@ Each step is useful by itself.
    **Failure modes:** table, links, inspector editing in the Systems view, checks, and the
    document section.
 4. **Effect chains.** *Done: under each failure mode, and an Effect chains section in each document.*
-5. **AI suggestions.**
+5. **AI suggestions.** *Done: **Suggest with AI** on the Failure modes screen; suggestions also show in the Review queue.*
 
 ## Out of scope for now
 

@@ -1,4 +1,4 @@
-# Handoff §7 / UX review 4.6: no screen scrolls sideways at 900 px (17 screens). Runs the real app in
+# Handoff §7 / UX review 4.6: no screen scrolls sideways at 900 px (19 screens). Runs the real app in
 # headless Chrome, so it needs shinytest2 and a Chrome that chromote can find.
 # Set MODELBENCH_SKIP_BROWSER_TESTS=true to leave it out.
 test_that("no screen scrolls sideways at 900 px", {
@@ -19,7 +19,7 @@ test_that("no screen scrolls sideways at 900 px", {
                unlist(lapply(names(WORKSPACE_TABS), function(workspace) {
                  lapply(WORKSPACE_TABS[[workspace]], function(tab) list(workspace = workspace, tab = tab))
                }), recursive = FALSE))
-  expect_length(screens, 17L)
+  expect_length(screens, 19L)
   overflow <- vapply(screens, function(screen) {
     # Clicks the workspace, then the tab, as a user would.
     click <- function(scope, label) {
@@ -29,6 +29,9 @@ test_that("no screen scrolls sideways at 900 px", {
     }
     click(".mb-nav button", screen$workspace)
     if (screen$workspace != "Project") click(".mb-tabbar button", screen$tab)
+    # Under load a screen can take longer than the idle wait to swap in, so wait for it.
+    app$wait_for_js(sprintf("[...document.querySelectorAll('.tab-pane.active')].filter(e => e.offsetParent).some(e => e.dataset.value === %s)",
+                            jsonlite::toJSON(screen$tab, auto_unbox = TRUE)), timeout = 15000)
     shown <- app$get_js("[...document.querySelectorAll('.tab-pane.active')].filter(e => e.offsetParent).map(e => e.dataset.value)")
     expect_identical(unlist(shown)[if (screen$workspace == "Project") 1L else 2L], screen$tab)
     app$get_js("document.documentElement.scrollWidth - document.documentElement.clientWidth")

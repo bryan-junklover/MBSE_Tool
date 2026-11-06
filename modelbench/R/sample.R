@@ -38,6 +38,8 @@ sample_copy_plain <- function(con, source, table) {
   rows <- DBI::dbReadTable(source, table)
   # init_project_db() has already set the schema version.
   if (table == "project_meta") rows <- rows[rows$key != "schema_version", , drop = FALSE]
+  # Every project starts with the standard unit registry, so only the sample's extra units are new.
+  if (table == "unit") rows <- rows[!rows$symbol %in% DBI::dbGetQuery(con, "SELECT symbol FROM unit")$symbol, , drop = FALSE]
   for (i in seq_len(nrow(rows))) write_plain(con, table, as.list(rows[i, , drop = FALSE]))
 }
 

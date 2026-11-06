@@ -1,6 +1,6 @@
 # Project workspace: which project is open, scope, glossary and id prefixes.
 
-PROJECT_SECTIONS <- c("General", "Glossary", "AI", "Data protection")
+PROJECT_SECTIONS <- c("General", "Glossary", "Units & properties", "AI", "Data protection")
 
 # Project settings in four tabs, in a centred reading column (UX review §2.29).
 mod_project_ui <- function(id) {
@@ -41,6 +41,44 @@ mod_project_ui <- function(id) {
                                                 shiny::textInput(ns("g_definition"), "Definition"),
                                                 shiny::selectInput(ns("g_element"), "Alias of", choices = with_blank(character(0), "No element"), selectize = FALSE),
                                                 shiny::tags$div(style = "align-self:end", shiny::actionButton(ns("g_add"), "Add term", class = "mb-btn"))))
+          ),
+          bslib::nav_panel_hidden(
+            "Units & properties",
+            shiny::tags$section(class = "mb-panel",
+                                shiny::tags$b("Properties"),
+                                shiny::tags$span(class = "mb-caption", "What a component can hold, such as Mass in kg. A roll-up adds values up the tree, times how many."),
+                                shiny::uiOutput(ns("properties")),
+                                shiny::tags$div(class = "mb-fields",
+                                                shiny::textInput(ns("p_label"), "Name"),
+                                                shiny::selectInput(ns("p_type"), "Kind", choices = c("Number" = "number", "Text" = "text"), width = "auto", selectize = FALSE),
+                                                shiny::selectInput(ns("p_unit"), "Unit", choices = c("None" = ""), width = "auto", selectize = FALSE),
+                                                shiny::selectInput(ns("p_rollup"), "Roll-up", choices = c("None" = "none", "Sum" = "sum", "Largest" = "max", "Smallest" = "min"),
+                                                                   width = "auto", selectize = FALSE),
+                                                shiny::tags$div(style = "align-self:end", shiny::actionButton(ns("p_add"), "Add property", class = "mb-btn")))),
+            shiny::tags$section(class = "mb-panel",
+                                shiny::tags$b("Budgets"),
+                                shiny::tags$span(class = "mb-caption", "A limit on a rolled-up property over part of the system. Health and the Structure inspector check it on every edit."),
+                                shiny::uiOutput(ns("budgets")),
+                                shiny::tags$div(class = "mb-fields",
+                                                shiny::selectInput(ns("b_property"), "Property", choices = character(0), width = "auto", selectize = FALSE),
+                                                shiny::selectInput(ns("b_scope"), "Over", choices = character(0), width = "auto", selectize = FALSE),
+                                                shiny::selectInput(ns("b_comparison"), "Must be", choices = c("At most" = "max", "At least" = "min"), width = "auto", selectize = FALSE),
+                                                shiny::textInput(ns("b_limit"), "Limit", width = "120px"),
+                                                shiny::selectInput(ns("b_unit"), "Unit", choices = character(0), width = "auto", selectize = FALSE),
+                                                shiny::selectInput(ns("b_requirement"), "From requirement", choices = c("None" = ""), width = "auto", selectize = FALSE),
+                                                shiny::tags$div(style = "align-self:end", shiny::actionButton(ns("b_add"), "Add budget", class = "mb-btn")))),
+            shiny::tags$section(class = "mb-panel",
+                                shiny::tags$b("Units"),
+                                shiny::tags$span(class = "mb-caption",
+                                                 "Every project has the standard units. Add your own here; a quantity already listed keeps its SI unit, so values convert."),
+                                shiny::uiOutput(ns("units")),
+                                shiny::tags$div(class = "mb-fields",
+                                                shiny::textInput(ns("u_symbol"), "Symbol", width = "100px"),
+                                                shiny::textInput(ns("u_quantity"), "Measures", placeholder = "speed", width = "140px"),
+                                                shiny::textInput(ns("u_si"), "SI unit", placeholder = "m/s", width = "100px"),
+                                                shiny::textInput(ns("u_factor"), "1 of it in SI", placeholder = "0.5144", width = "120px"),
+                                                shiny::textInput(ns("u_offset"), "Offset", placeholder = "0", width = "90px"),
+                                                shiny::tags$div(style = "align-self:end", shiny::actionButton(ns("u_add"), "Add unit", class = "mb-btn"))))
           ),
           bslib::nav_panel_hidden("AI", mod_ai_settings_ui("ai_settings", "ai")),
           bslib::nav_panel_hidden("Data protection", mod_ai_settings_ui("ai_settings", "data"))
@@ -134,6 +172,78 @@ mod_project_server <- function(id, state, workspace_dir) {
       shiny::updateTextInput(session, "g_term", value = "")
       shiny::updateTextInput(session, "g_definition", value = "")
     })
+    # --- Units & properties ---
+    output$properties <- shiny::renderUI({
+      db_dep(state, "model")
+      rows <- property_def_list(con())
+      if (nrow(rows) == 0L) return(shiny::tags$span(class = "mb-caption", "No properties yet."))
+      rollups <- c(none = "—", sum = "Sum", max = "Largest", min = "Smallest")
+      simple_table(c("Property", "Kind", "Unit", "Roll-up", "Held by"),
+                   lapply(seq_len(nrow(rows)), function(i) {
+                     list(rows$label[i], rows$value_type[i], if (is.na(rows$unit[i])) "—" else rows$unit[i],
+                          rollups[[rows$rollup[i]]], sprintf("%d component%s", rows$used[i], if (rows$used[i] == 1L) "" else "s"))
+                   }))
+    })
+    output$budgets <- shiny::renderUI({
+      db_dep(state, "model")
+      rows <- budget_list(con())
+      if (nrow(rows) == 0L) return(shiny::tags$span(class = "mb-caption", "No budgets yet."))
+      simple_table(c("Budget", "Over", "Now / limit", ""),
+                   lapply(seq_len(nrow(rows)), function(i) {
+                     list(sprintf("%s, %s", rows$label[i], if (rows$comparison[i] == "max") "at most" else "at least"), rows$scope_name[i],
+                          shiny::tags$span(class = paste("mono", if (!rows$pass[i]) "mb-gap"), sprintf("%s%s", rows$text[i], if (rows$pass[i]) "" else " · FAIL")),
+                          confirm_button("Remove", ns("b_delete"), rows$id[i], sprintf("Remove the %s budget?", tolower(rows$label[i])),
+                                         sprintf("%s no longer has a %s limit. Undo brings it back.", rows$scope_name[i], tolower(rows$label[i])),
+                                         confirm = "Remove budget", class = "mb-btn mb-btn-small"))
+                   }))
+    })
+    output$units <- shiny::renderUI({
+      db_dep(state, "settings")
+      rows <- unit_list(con())
+      groups <- split(rows$symbol, rows$quantity)
+      shiny::tags$div(class = "mb-prop-grid", style = "grid-template-columns: minmax(120px,auto) minmax(0,1fr)",
+                      unlist(lapply(names(groups), function(quantity) {
+                        list(shiny::tags$span(class = "mb-caption", quantity), shiny::tags$span(class = "mono", paste(groups[[quantity]], collapse = "  ")))
+                      }), recursive = FALSE))
+    })
+    shiny::observe({
+      db_dep(state, "settings")
+      db_dep(state, "model")
+      db_dep(state, "spec")
+      units <- unit_list(con())$symbol
+      shiny::updateSelectInput(session, "p_unit", choices = c("None" = "", stats::setNames(units, units)))
+      defs <- property_def_list(con())
+      defs <- defs[defs$rollup != "none" & !is.na(defs$unit), , drop = FALSE]
+      shiny::updateSelectInput(session, "b_property", choices = stats::setNames(defs$id, sprintf("%s (%s)", defs$label, defs$unit)))
+      components <- DBI::dbGetQuery(con(), "SELECT id, name FROM element WHERE kind = 'component' ORDER BY parent_id IS NOT NULL, sort_order, name")
+      shiny::updateSelectInput(session, "b_scope", choices = stats::setNames(components$id, components$name))
+      requirements <- DBI::dbGetQuery(con(), "SELECT id, coalesce(short_title, substr(text, 1, 40)) AS title FROM requirement WHERE status = 'committed' ORDER BY id")
+      shiny::updateSelectInput(session, "b_requirement", choices = c("None" = "", stats::setNames(requirements$id, paste(requirements$id, requirements$title))))
+    })
+    # The budget's unit choices are the property's own quantity.
+    shiny::observe({
+      db_dep(state, "settings")
+      def <- if (is.null(input$b_property) || !nzchar(input$b_property)) NULL else DBI::dbGetQuery(con(), "SELECT unit FROM property_def WHERE id = ?", params = list(input$b_property))
+      units <- unit_list(con())
+      same <- if (is.null(def) || nrow(def) == 0L || is.na(def$unit)) character(0) else units$symbol[units$quantity == units$quantity[units$symbol == def$unit]]
+      shiny::updateSelectInput(session, "b_unit", choices = same, selected = if (!is.null(def) && nrow(def) == 1L) def$unit)
+    })
+    shiny::observeEvent(input$p_add, {
+      written <- model_edit(state, add_property_def(con(), input$p_label, input$p_type, input$p_unit, input$p_rollup), "add property")
+      if (!is.null(written)) shiny::updateTextInput(session, "p_label", value = "")
+    })
+    shiny::observeEvent(input$b_add, {
+      written <- model_edit(state, add_budget(con(), input$b_property, input$b_scope, input$b_limit, input$b_unit, input$b_comparison, input$b_requirement), "add budget")
+      if (!is.null(written)) shiny::updateTextInput(session, "b_limit", value = "")
+    })
+    shiny::observeEvent(input$b_delete, model_edit(state, delete_entity(con(), "budget", input$b_delete), "remove budget"))
+    shiny::observeEvent(input$u_add, {
+      added <- guarded_edit(add_unit(con(), input$u_symbol, input$u_quantity, input$u_si, input$u_factor, input$u_offset))
+      if (is.null(added)) return()
+      invalidate_db(state, "settings")
+      for (field in c("u_symbol", "u_quantity", "u_si", "u_factor", "u_offset")) shiny::updateTextInput(session, field, value = "")
+    })
+
     shiny::observeEvent(input$g_delete, {
       delete_glossary(con(), input$g_delete)
       invalidate_db(state, "settings")
@@ -155,4 +265,13 @@ mod_project_server <- function(id, state, workspace_dir) {
       invalidate_db(state, "settings")
     })
   })
+}
+
+# A small read-only table: a header row and one list of cells per row.
+simple_table <- function(header, rows) {
+  shiny::tags$div(class = "mb-table", shiny::tags$table(
+    class = "mb-simple",
+    shiny::tags$thead(shiny::tags$tr(lapply(header, shiny::tags$th))),
+    shiny::tags$tbody(lapply(rows, function(cells) shiny::tags$tr(lapply(cells, shiny::tags$td))))
+  ))
 }

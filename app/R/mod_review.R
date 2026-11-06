@@ -86,18 +86,28 @@ render_proposal_card <- function(row, ns) {
     if (!is.na(row$body) && nzchar(row$body)) shiny::tags$div(class = "mb-caption", row$body),
     if (!is.null(payload$`_warning`)) shiny::tags$div(class = "mb-gap", style = "font-size:12px", payload$`_warning`),
     if (!is.null(payload$`_invented`)) shiny::tags$div(class = "mb-caption", sprintf("%d value%s the model tried to invent became [value].", payload$`_invented`, if (payload$`_invented` == 1L) "" else "s")),
-    if (row$proposal_kind %in% c("sketch_element", "sketch_function")) {
-      ports <- vapply(payload$ports, function(port) sprintf("%s %s", port$direction, port$interface), "")
-      shiny::tagList(
+    if (row$proposal_kind %in% c("sketch_element", "sketch_function", "sketch_failure")) {
+      box <- if (row$proposal_kind == "sketch_failure") {
+        effects <- c(payload$local_effect, payload$system_effect)
+        shiny::tags$div(class = "mb-sketch-box",
+                        shiny::tags$div(class = "mono mb-caption", "Suggested failure · the response stays yours"),
+                        shiny::tags$b(payload$subject_label %||% payload$subject_id), " · ", FAILURE_CAUSES[[payload$cause_kind]],
+                        if (length(effects) > 0L) shiny::tags$div(style = "font-size:13px", paste(effects[nzchar(effects)], collapse = " → ")))
+      } else {
+        ports <- vapply(payload$ports, function(port) sprintf("%s %s", port$direction, port$interface), "")
         shiny::tags$div(class = "mb-sketch-box",
                         shiny::tags$div(class = "mono mb-caption", "Sketch · structure only, no values"),
                         shiny::tags$b(payload$name), if (nzchar(payload$stereotype %||% "")) sprintf(" «%s»", payload$stereotype),
-                        if (length(ports) > 0L) paste(" · ports:", paste(ports, collapse = ", "))),
+                        if (length(ports) > 0L) paste(" · ports:", paste(ports, collapse = ", ")))
+      }
+      shiny::tagList(
+        box,
         if (open) {
           note <- ns(paste0("note_", row$id))
           confirm <- ns("keep")
           shiny::tagList(
-            shiny::tags$label(style = "display:flex;flex-direction:column;gap:4px;font-size:13px", "Your note: why the system needs this (required)",
+            shiny::tags$label(style = "display:flex;flex-direction:column;gap:4px;font-size:13px",
+                              if (row$proposal_kind == "sketch_failure") "Your note: why this failure matters (required)" else "Your note: why the system needs this (required)",
                               shiny::tags$input(type = "text", id = note, class = "mb-table-input", placeholder = "In your own words",
                                                 oninput = sprintf("document.getElementById('%s').disabled = !this.value.trim()", paste0(note, "_go")))),
             shiny::tags$div(class = "mb-term-actions",
@@ -137,6 +147,16 @@ render_proposal_card <- function(row, ns) {
                       shiny::tags$button(type = "button", class = "mb-linkish", onclick = event_js(ns("see_call"), row$llm_call_id), "See the prompt"))
     }
   )
+}
+
+# "See the prompt": exactly what was sent, and the schema the answer had to fit.
+show_llm_call <- function(con, call_id) {
+  call <- DBI::dbGetQuery(con, "SELECT system_prompt, user_message, schema_json FROM llm_call WHERE id = ?", params = list(call_id))
+  shiny::req(nrow(call) == 1L)
+  shiny::showModal(shiny::modalDialog(title = "See the prompt", size = "l", easyClose = TRUE,
+                                      shiny::tags$pre(style = "white-space:pre-wrap;font-size:12px",
+                                                      paste0("SYSTEM\n", call$system_prompt, "\n\nMESSAGE\n", call$user_message, "\n\nANSWER SCHEMA\n", call$schema_json)),
+                                      footer = shiny::modalButton("Close")))
 }
 
 mod_review_server <- function(id, state) {
@@ -228,14 +248,7 @@ mod_review_server <- function(id, state) {
       if (gaps_task$status() == "running") return(shiny::tags$span(class = "mb-caption", "Checking…"))
       if (!is.null(run_message())) shiny::tags$span(run_message())
     })
-    shiny::observeEvent(input$see_call, {
-      call <- DBI::dbGetQuery(con(), "SELECT system_prompt, user_message, schema_json FROM llm_call WHERE id = ?", params = list(input$see_call))
-      shiny::req(nrow(call) == 1L)
-      shiny::showModal(shiny::modalDialog(title = "See the prompt", size = "l", easyClose = TRUE,
-                                          shiny::tags$pre(style = "white-space:pre-wrap;font-size:12px",
-                                                          paste0("SYSTEM\n", call$system_prompt, "\n\nMESSAGE\n", call$user_message, "\n\nANSWER SCHEMA\n", call$schema_json)),
-                                          footer = shiny::modalButton("Close")))
-    })
+    shiny::observeEvent(input$see_call, show_llm_call(con(), input$see_call))
     invisible(list(proposals = proposals, task = gaps_task))
   })
 }

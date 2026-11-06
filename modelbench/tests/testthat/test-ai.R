@@ -419,7 +419,7 @@ test_that("the seeds run twice without changing a chosen route", {
   con <- init_project_db(path)
   on.exit(DBI::dbDisconnect(con))
   expect_identical(DBI::dbGetQuery(con, "SELECT model FROM task_route WHERE task = 'req_light_check'")$model, "chosen")
-  expect_identical(nrow(routes_table(con)), 11L)
+  expect_identical(nrow(routes_table(con)), 12L)
 })
 
 test_that("a connection test reports in plain words", {

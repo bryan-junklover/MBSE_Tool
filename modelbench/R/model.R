@@ -444,7 +444,13 @@ flow_label <- function(connector_id, label, rate_value, rate_unit, quantities) {
 flows_view <- function(con, flow_types = c("data", "energy", "matter"), root = default_structure_root(con), quantities = TRUE) {
   view <- structure_view(con, "VW-flows", root, include_external = TRUE)
   connected <- unique(c(view$edges$source_holder, view$edges$target_holder))
-  view$nodes <- view$nodes[view$nodes$kind != "external" | view$nodes$id %in% connected, , drop = FALSE]
+  # Outside equipment shows where it connects at this level, or where it's been placed on
+  # this diagram, so a new one stays on screen to be wired up.
+  placed <- layout_rows(con, "VW-flows")
+  placed <- placed$item_id[placed$item_kind == "element"]
+  view$nodes <- view$nodes[view$nodes$kind != "external" | view$nodes$id %in% connected |
+                             (view$nodes$id %in% placed & !view$nodes$id %in% DBI::dbGetQuery(con, "
+                               SELECT DISTINCT p.element_id FROM port p JOIN connector c ON c.source_port_id = p.id OR c.target_port_id = p.id")$element_id), , drop = FALSE]
   view$ports <- view$ports[view$ports$element_id %in% view$nodes$id, , drop = FALSE]
   edges <- view$edges[view$edges$flow_type %in% flow_types, , drop = FALSE]
   if (quantities && nrow(edges) > 0L) {

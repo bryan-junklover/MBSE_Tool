@@ -1,4 +1,4 @@
-WORKSPACES <- c("Project", "Write", "Model", "Behavior", "Analyze")
+WORKSPACES <- c("Project", "Write", "Model", "Behavior", "Analyze", "Help")
 
 # Fingerprinted so a changed stylesheet can't be served stale (a Coach lesson).
 asset_url <- function(file) {
@@ -115,6 +115,14 @@ app_ui <- function() {
             screen("Analyze", "Baselines & impact", mod_baselines_ui, "baselines"),
             screen("Analyze", "Documents", mod_documents_ui, "documents")
           )
+        ),
+        bslib::nav_panel_hidden(
+          "Help",
+          bslib::navset_hidden(
+            id = "help_tab", selected = "User guide",
+            screen("Help", "User guide", mod_help_ui, "help_guide", "USER_GUIDE.md"),
+            screen("Help", "How-to", mod_help_ui, "help_howto", "HOW_TO.md")
+          )
         )
       )
     ),
@@ -126,9 +134,10 @@ WORKSPACE_TABS <- list(
   Write = c("Draft", "Specification", "Traceability"),
   Model = c("Structure", "Flows", "Functional", "Interfaces", "Stakeholder"),
   Behavior = c("Scenarios", "State machines", "Failure modes", "Behavioral impact"),
-  Analyze = c("Health", "Review queue", "Baselines & impact", "Documents")
+  Analyze = c("Health", "Review queue", "Baselines & impact", "Documents"),
+  Help = c("User guide", "How-to")
 )
-TAB_SETS <- c(Write = "write_tab", Model = "model_tab", Behavior = "behavior_tab", Analyze = "analyze_tab")
+TAB_SETS <- c(Write = "write_tab", Model = "model_tab", Behavior = "behavior_tab", Analyze = "analyze_tab", Help = "help_tab")
 
 render_return_bar <- function(back, back_input, dismiss_input) {
   shiny::tags$div(class = "mb-returnbar", role = "note",
@@ -180,7 +189,7 @@ app_server <- function(input, output, session) {
   })
   output$top_nav <- shiny::renderUI(render_top_nav(state$nav()$workspace, "nav_click"))
   # The tab last used in each workspace, kept when moving between them.
-  tabs <- shiny::reactiveVal(list(Write = "Draft", Model = "Structure", Behavior = "Scenarios", Analyze = "Health"))
+  tabs <- shiny::reactiveVal(list(Write = "Draft", Model = "Structure", Behavior = "Scenarios", Analyze = "Health", Help = "User guide"))
 
   # The way back after a jump, shown on the screen the jump went to (UX review §2.26).
   output$return_bar <- shiny::renderUI({

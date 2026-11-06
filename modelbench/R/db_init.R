@@ -77,16 +77,26 @@ schema_version <- function(con) {
 
 # Runs each migrations/NNN_description.sql with NNN above the stored version,
 # once, in a transaction, and bumps the version with it (SCHEMA §9).
+# Foreign keys are off while a migration runs, so a table can be rebuilt while others
+# refer to it (SQLite's own procedure for schema changes). Before the commit every
+# reference is checked, and one left dangling rolls the migration back.
 run_migrations <- function(con, dir = migrations_dir()) {
   files <- if (nzchar(dir)) sort(list.files(dir, pattern = "^[0-9]+_.*[.]sql$", full.names = TRUE)) else character(0)
+  enforced <- DBI::dbGetQuery(con, "PRAGMA foreign_keys")$foreign_keys == 1L
   for (file in files) {
     version <- as.integer(sub("_.*$", "", basename(file)))
     if (version <= schema_version(con)) next
-    DBI::dbWithTransaction(con, {
+    DBI::dbExecute(con, "PRAGMA foreign_keys = OFF")
+    tryCatch(DBI::dbWithTransaction(con, {
       run_sql_file(con, file)
+      dangling <- DBI::dbGetQuery(con, "PRAGMA foreign_key_check")
+      if (nrow(dangling) > 0L) {
+        stop(sprintf("Migration %s leaves %d broken reference%s, in %s.", basename(file), nrow(dangling),
+                     if (nrow(dangling) == 1L) "" else "s", paste(unique(dangling$table), collapse = ", ")), call. = FALSE)
+      }
       DBI::dbExecute(con, "UPDATE project_meta SET value = ? WHERE key = 'schema_version'",
                      params = list(as.character(version)))
-    })
+    }), finally = if (enforced) DBI::dbExecute(con, "PRAGMA foreign_keys = ON"))
   }
   invisible(schema_version(con))
 }

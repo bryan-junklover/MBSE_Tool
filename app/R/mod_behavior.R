@@ -500,6 +500,7 @@ mod_machines_ui <- function(id, tabs = NULL) {
   side_panel <- function(value, ...) shiny::conditionalPanel(sprintf("output.side_tab == '%s'", value), ns = ns, class = "mb-side-panel", ...)
   shiny::tagList(
     screen_bar(tabs, actions = shiny::tagList(
+      shiny::actionButton(ns("new_machine"), "New state machine…", class = "mb-btn"),
       shiny::actionButton(ns("add_state"), "Add state", class = "mb-btn"),
       shiny::actionButton(ns("auto_layout"), "Auto-layout", class = "mb-btn"))),
     shiny::tags$div(
@@ -571,10 +572,32 @@ mod_machines_server <- function(id, state) {
       db_dep(state, "behavior")
       DBI::dbGetQuery(con(), "SELECT m.id, m.name, e.name AS owner FROM state_machine m JOIN element e ON e.id = m.owner_element_id ORDER BY m.id")
     })
+    # A machine just created is chosen once the list has it.
+    pick_machine <- shiny::reactiveVal(NULL)
     shiny::observe({
       rows <- machines()
-      keep <- shiny::isolate(input$machine)
+      picked <- shiny::isolate(pick_machine())
+      keep <- if (!is.null(picked) && picked %in% rows$id) picked else shiny::isolate(input$machine)
+      if (!is.null(picked) && picked %in% rows$id) pick_machine(NULL)
       shiny::updateSelectInput(session, "machine", choices = stats::setNames(rows$id, sprintf("%s · %s", rows$owner, rows$name)), selected = if (!is.null(keep) && keep %in% rows$id) keep)
+    })
+    shiny::observeEvent(input$new_machine, {
+      components <- DBI::dbGetQuery(con(), "SELECT id, name FROM element WHERE kind = 'component' ORDER BY sort_order, name")
+      shiny::showModal(shiny::modalDialog(
+        title = "New state machine",
+        shiny::textInput(ns("machine_name"), "Name", placeholder = "Operating modes"),
+        shiny::selectInput(ns("machine_owner"), "Behaviour of", choices = stats::setNames(components$id, components$name), selectize = FALSE),
+        shiny::textInput(ns("machine_first"), "Starts in", value = "Idle"),
+        if (nrow(components) == 0L) shiny::tags$p(class = "mb-gap", "Add a component on Model › Structure first: a state machine describes one."),
+        footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("machine_confirm"), "Create", class = "mb-btn mb-btn-primary"))
+      ))
+    })
+    shiny::observeEvent(input$machine_confirm, {
+      written <- behavior_edit(state, create_state_machine(con(), input$machine_name, input$machine_owner, input$machine_first), "new state machine")
+      if (is.null(written)) return()
+      shiny::removeModal()
+      pick_machine(written$id)
+      shiny::updateSelectInput(session, "machine", selected = written$id)
     })
     sm_id <- shiny::reactive({
       value <- input$machine

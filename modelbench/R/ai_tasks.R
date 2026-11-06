@@ -111,6 +111,7 @@ keep_sketch <- function(con, id, note, author = "engineer") {
   proposal <- DBI::dbGetQuery(con, "SELECT * FROM ai_proposal WHERE id = ?", params = list(id))
   if (nrow(proposal) == 0L) refuse("That proposal no longer exists.")
   if (proposal$status != "open") refuse("That proposal has already been handled.")
+  if (proposal$proposal_kind == "sketch_failure") return(keep_failure_sketch(con, proposal, note, author))
   payload <- jsonlite::fromJSON(proposal$payload_json, simplifyVector = FALSE)
   kind <- switch(proposal$proposal_kind, sketch_element = "component", sketch_function = "function", refuse("That isn't a sketch of a model element."))
   if (!nzchar(trimws(if (is.null(payload$name)) "" else payload$name))) refuse("This sketch has no name, so it can't be added.")
