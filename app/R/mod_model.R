@@ -104,9 +104,12 @@ render_facts <- function(view, budgets, analyses, findings) {
     class = "mb-facts mb-facts-stack",
     shiny::tags$div(class = "mb-label", "This level"),
     shiny::tags$span(level_count(view)),
+    # Budgets are project-wide, so each names what it covers (review G7).
+    if (nrow(budgets) > 0L) shiny::tags$div(class = "mb-label", "Budgets"),
     lapply(seq_len(nrow(budgets)), function(i) {
-      shiny::tags$span(class = if (!budgets$pass[i]) "mb-gap",
-                       sprintf("%s %s%s", budgets$label[i], budgets$text[i], if (!budgets$pass[i]) " · FAIL" else ""))
+      incomplete <- !is.na(budgets$note[i]) && grepl("^excludes", budgets$note[i])
+      shiny::tags$span(class = if (!budgets$pass[i] || incomplete) "mb-gap",
+                       sprintf("%s over %s: %s", budgets$label[i], budgets$scope_name[i], budget_status_text(budgets$text[i], budgets$pass[i], budgets$note[i])))
     }),
     lapply(seq_len(nrow(analyses)), function(i) {
       shiny::tags$span(class = if (!analyses$pass[i]) "mb-gap",

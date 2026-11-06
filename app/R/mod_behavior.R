@@ -583,11 +583,15 @@ render_checks <- function(rows, ns) {
   )
 }
 
-render_completeness <- function(pairs, ns) {
+render_completeness <- function(pairs, ns, unscoped = data.frame(name = character(0))) {
   shiny::tags$section(
     class = "mb-inspector",
     shiny::tags$div(class = "mb-head", shiny::tags$b("Completeness"), shiny::tags$span(class = "mono mb-caption", "code · every edit")),
-    if (nrow(pairs) == 0L) shiny::tags$span("Every in-scope pair is handled."),
+    if (nrow(unscoped) > 0L) {
+      shiny::tags$span(class = "mb-gap", sprintf("No state must handle %s, so %s checked. To check one, select a state and tick it under Must handle.",
+                                                 paste(unscoped$name, collapse = ", "), if (nrow(unscoped) == 1L) "it isn't" else "they aren't"))
+    },
+    if (nrow(pairs) == 0L) shiny::tags$span(if (nrow(unscoped) > 0L) "Every ticked pair is handled." else "Every in-scope pair is handled."),
     if (nrow(pairs) > 0L) shiny::tags$span(class = "mb-gap", sprintf("%d unhandled event/state pair%s", nrow(pairs), if (nrow(pairs) == 1L) "" else "s")),
     lapply(seq_len(nrow(pairs)), function(i) {
       pair <- pairs[i, ]
@@ -856,7 +860,7 @@ mod_machines_server <- function(id, state) {
     output$completeness <- shiny::renderUI({
       db_dep(state, "behavior")
       shiny::req(sm_id())
-      render_completeness(unhandled_pairs(con(), sm_id()), ns)
+      render_completeness(unhandled_pairs(con(), sm_id()), ns, unscoped_events(con(), sm_id()))
     })
     assertions <- shiny::reactive({
       db_dep(state, "behavior")
@@ -940,8 +944,7 @@ mod_machines_server <- function(id, state) {
     })
     shiny::observeEvent(input$event_confirm, {
       name <- trimws(input$event_name)
-      if (!grepl("^[a-z][a-z0-9_]*$", name)) return(refusal_toast("An event name is snake_case, like gnss_lost."))
-      if (!is.null(behavior_edit(state, write_sm_event(con(), fields = list(sm_id = sm_id(), name = name), note = "Added event"), "add event"))) shiny::removeModal()
+      if (!is.null(behavior_edit(state, add_sm_event(con(), sm_id(), name), "add event"))) shiny::removeModal()
     })
     shiny::observeEvent(input$add_variable, {
       shiny::showModal(shiny::modalDialog(
@@ -1026,7 +1029,7 @@ mod_machines_server <- function(id, state) {
             i <- i + 1L
             name <- sprintf("New state %d", i)
           }
-          written <- behavior_edit(state, save_state(con(), fields = list(sm_id = sm_id(), name = name), note = "Added state"), "add state")
+          written <- behavior_edit(state, add_sm_state(con(), sm_id(), name), "add state")
           if (!is.null(written)) save_layout(con(), view_id, layout_items(data.frame(id = written$id, x = event$x, y = event$y), item_kind = "sm_state"))
         }
       )

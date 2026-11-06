@@ -1,6 +1,6 @@
 # ModelBench workflow review
 
-**Date:** 2026-11-06 · **Reviewed:** `ux-review-fixes` @ efef5a0 · **Status:** fixed so far: the doc claims; A1–A7; B1–B4 and B7–B9; C1 and C2; D2; G4. Partly fixed: B5 and C5. The rest is open.
+**Date:** 2026-11-06 · **Reviewed:** `ux-review-fixes` @ efef5a0 · **Status:** fixed so far: the doc claims; A1–A7; B1–B4 and B7–B9; C1–C5, C7 and C8; D2; G4 and G7. Partly fixed: B5. The rest is open.
 
 **Method**
 
@@ -211,19 +211,24 @@ checked.** A stakeholder requirement can sit under a subsystem one.
   inspector, Health and the Budgets table. The Remove button is inside the failing table.
 - **Fix:** treat NA as "no values yet" in `budget_status`.
 
-**C3 (P2) Completeness passes for a state machine nobody has scoped.** *Confirmed.*
+**C3 (P2) Completeness passes for a state machine nobody has scoped.** *Confirmed.* — **Fixed.**
+- A new event is in scope in every non-final state, and a new state takes every event, so Completeness checks them from the start.
+- Completeness names any event no state must handle. The sample's start-up and landing events show there.
 - **Why:** `v_sm_unhandled` counts only pairs in `sm_event_scope`. New machines and new events get
   no scope, so the tab says "Every in-scope pair is handled". The how-to (§9 step 5) says it lists
   each unhandled event.
 - **Fix:** put a new event in scope for every non-final state by default, or report "N events
   have no scope".
 
-**C4 (P2) Budgets that leave out placeholders read as passing.** With the only Mass value a
+**C4 (P2) Budgets that leave out placeholders read as passing.** — **Fixed.** The budget line reads, for example, "3.31 / 3.60 kg · incomplete, excludes 1 placeholder" in amber, on Structure, Health and Project. The Structure inspector lists budgets under their own label, each naming its scope (G7). With the only Mass value a
 placeholder, a budget reads "0 / 2 kg" and passes. The "excludes N placeholder" note is computed
 but only the documents show it.
 - **Fix:** show the note, and mark the budget incomplete rather than passing.
 
-**C5 (P2) "Handled" can rest on links that handle nothing.** — **Partly fixed.** Deprecated requirements no longer count as handling anything. Rule 6's verification check still accepts any link.
+**C5 (P2) "Handled" can rest on links that handle nothing.** — **Fixed**, except a handling transition in an unrelated machine.
+- Deprecated requirements no longer count as handling anything.
+- Rule 6 counts a requirement as verified only when at least one test case passes now or one assertion passes when run, and nothing fails.
+- Its finding says which is missing: nothing linked, no passing result yet, or a failing check.
 - Rule 2 accepts any `handled_by` link, including one to a deprecated requirement or a transition
   in an unrelated machine.
 - Rule 6 accepts any `verified_by` link, even to a failing assertion or a test never run.
@@ -234,11 +239,13 @@ but only the documents show it.
 counts records with no link filter, and Specification lists only linked test cases.
 - **Fix:** count only test cases still linked, or offer **Retire evidence**.
 
-**C7 (P2) Assertion results never reach the requirement.** Specification shows "No test cases yet"
+**C7 (P2) Assertion results never reach the requirement.** — **Fixed.** The Verification panel lists each linked assertion, with how it runs now and its last recorded result. Specification shows "No test cases yet"
 for SYS-012, which assertion A-001 verifies. The user guide says a requirement's checks run live.
 - **Fix:** list linked assertions in the Verification panel, with their live and recorded results.
 
-**C8 (P2) A baseline can be taken with failing checks, and nothing says so.** Only placeholders,
+**C8 (P2) A baseline can be taken with failing checks, and nothing says so.** — **Fixed.**
+- The Create dialog lists, under "Doesn't block, but worth knowing": failing or incomplete budgets, missed analyses, failing assertions, unhandled pairs, open failure responses and unallocated requirements.
+- The list is written into the baseline's note. Only placeholders,
 unreviewed drafts and stale evidence block. None of these are mentioned:
 - failing budgets;
 - failing or never-run assertions;
@@ -367,7 +374,7 @@ stale (C1). Committing without a coach downgrades an already-coached requirement
 - **G5:** duplicate port, interface or field names give raw UNIQUE errors.
 - **G6:** AI-sketched steps can only be reviewed one at a time; reviewing the scenario doesn't
   review its steps.
-- **G7:** with nothing selected, the inspector labels every budget "This level", whatever the
+- **G7** *(fixed)***:** with nothing selected, the inspector labels every budget "This level", whatever the
   level.
 - **G8:** a budget on a ×4 part counts four times the part's value, and nothing says so.
 - **G9:** a scenario can't have the other kind of diagram added later.

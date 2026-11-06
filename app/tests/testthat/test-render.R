@@ -162,3 +162,9 @@ test_that("a widget reinstalled under a running session is noticed", {
   expect_null(stale_package("mbdiagram"))
   expect_null(stale_package("not.a.loaded.package"))
 })
+
+test_that("a budget line says when it fails or leaves out values", {
+  expect_identical(budget_status_text("3.31 / 3.60 kg", TRUE, "excludes 1 placeholder"), "3.31 / 3.60 kg · incomplete, excludes 1 placeholder")
+  expect_identical(budget_status_text("9 / 5 W", FALSE, NA_character_), "9 / 5 W · FAIL")
+  expect_identical(budget_status_text("no values yet / 5 A", TRUE, "no values yet"), "no values yet / 5 A")
+})

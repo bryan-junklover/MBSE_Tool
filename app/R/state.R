@@ -144,6 +144,13 @@ aria_label <- function(tag, element, label) {
   htmltools::tagQuery(tag)$find(element)$addAttrs(`aria-label` = label)$allTags()
 }
 
+# A budget's value against its limit, saying when it's failing or leaves out placeholders.
+# A budget missing values can pass only on the values it has.
+budget_status_text <- function(text, pass, note) {
+  incomplete <- !is.na(note) && grepl("^excludes", note)
+  paste0(text, if (!pass) " · FAIL" else "", if (incomplete) sprintf(" · incomplete, %s", note) else "")
+}
+
 # A delete's consequences in words, from delete_effects(): what goes with it, and what stays
 # but loses its link. A refusal says why instead, and the button is still offered so the
 # reason shows on the toast.

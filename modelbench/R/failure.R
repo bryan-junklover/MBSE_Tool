@@ -12,7 +12,7 @@ FAILURE_TARGET_LABELS <- c(sm_event = "state machine event", requirement = "requ
 FAILURE_RULES <- c(open_response = "Response not decided", handled_unlinked = "Handled, but by nothing",
                    missing_signal_loss = "Signal loss not covered", missing_power_loss = "Power loss not covered",
                    missing_over_temperature = "Over-temperature not covered", missing_out_of_range = "Out-of-range value not covered",
-                   handled_unverified = "Handled by an unverified requirement")
+                   handled_unverified = "Handled by a requirement that isn't verified")
 WAIVABLE_RULES <- c("missing_signal_loss", "missing_power_loss", "missing_over_temperature", "missing_out_of_range")
 
 capitalise <- function(x) paste0(toupper(substr(x, 1L, 1L)), substring(x, 2L))
@@ -238,14 +238,15 @@ failure_findings <- function(con) {
                                        sprintf("%s.%s has a range, but nothing records what happens when a value falls outside it.", row$interface, row$name),
                                        suggest_subject = paste0("interface|", row$interface_id), suggest_cause = "out_of_range", suggest_field = row$name)
   }
-  # 6: handled by a requirement nothing verifies.
+  # 6: handled by a requirement whose verification doesn't hold: nothing linked, nothing
+  # passing yet, or something failing.
   handled_reqs <- links[links$link_type == "handled_by" & links$target_kind == "requirement", , drop = FALSE]
   for (i in seq_len(nrow(handled_reqs))) {
-    verified <- DBI::dbGetQuery(con, "SELECT 1 FROM link WHERE link_type = 'verified_by' AND source_kind = 'requirement' AND source_id = ?",
-                                params = list(handled_reqs$target_id[i]))
-    if (nrow(verified) > 0L) next
+    status <- requirement_verification(con, handled_reqs$target_id[i])
+    if (status$verified) next
+    why <- if (status$linked == 0L) "nothing verifies yet" else if (status$failing > 0L) "has a failing check" else "has no passing result yet"
     out[[length(out) + 1L]] <- finding("handled_unverified", "failure_mode", handled_reqs$source_id[i],
-                                       sprintf("%s is handled by %s, which nothing verifies yet.", handled_reqs$source_id[i], handled_reqs$target_id[i]),
+                                       sprintf("%s is handled by %s, which %s.", handled_reqs$source_id[i], handled_reqs$target_id[i], why),
                                        handled_reqs$source_id[i])
   }
   do.call(rbind, c(list(finding(character(0), character(0), character(0), character(0), character(0), character(0), character(0), character(0))), out))

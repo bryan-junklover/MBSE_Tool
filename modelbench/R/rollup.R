@@ -77,7 +77,8 @@ budget_status <- function(con) {
     value <- if (known) unit_conversion(con, result$value, result$unit, budget$unit) else NA_real_
     pass <- !known || meets_limit(value, budget$limit_value, budget$comparison)
     note <- if (!known) "no values yet" else if (result$excluded_placeholders > 0L) sprintf("excludes %d placeholder", result$excluded_placeholders) else NA_character_
-    data.frame(id = budget$id, label = budget$label, scope = budget$scope_element_id, value = value,
+    scope_name <- DBI::dbGetQuery(con, "SELECT name FROM element WHERE id = ?", params = list(budget$scope_element_id))$name
+    data.frame(id = budget$id, label = budget$label, scope = budget$scope_element_id, scope_name = scope_name, value = value,
                limit = budget$limit_value, unit = budget$unit, pass = pass, note = note,
                text = if (known) {
                  sprintf("%s / %s %s", format_amount(value, budget$limit_value), format_amount(budget$limit_value), budget$unit)
@@ -86,7 +87,7 @@ budget_status <- function(con) {
                },
                stringsAsFactors = FALSE)
   })
-  do.call(rbind, c(list(data.frame(id = character(0), label = character(0), scope = character(0), value = numeric(0),
+  do.call(rbind, c(list(data.frame(id = character(0), label = character(0), scope = character(0), scope_name = character(0), value = numeric(0),
                                    limit = numeric(0), unit = character(0), pass = logical(0), note = character(0),
                                    text = character(0), stringsAsFactors = FALSE)), rows))
 }

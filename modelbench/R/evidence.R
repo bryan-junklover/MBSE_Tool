@@ -102,3 +102,33 @@ add_test_case <- function(con, requirement_id, name, method, author = "engineer"
     written
   })
 }
+
+# State machine assertions that verify a requirement, each checked now and with its latest
+# recorded run.
+requirement_assertions <- function(con, requirement_id) {
+  rows <- DBI::dbGetQuery(con, "
+    SELECT a.*, m.name AS machine, r.result AS recorded, r.run_at, r.model_hash
+      FROM link l JOIN sm_assertion a ON a.id = l.target_id JOIN state_machine m ON m.id = a.sm_id
+      LEFT JOIN sm_run r ON r.id = (SELECT max(id) FROM sm_run WHERE assertion_id = a.id)
+     WHERE l.link_type = 'verified_by' AND l.source_kind = 'requirement' AND l.source_id = ? AND l.target_kind = 'sm_assertion'
+     ORDER BY a.id", params = list(requirement_id))
+  rows$live <- rep(NA_character_, nrow(rows))
+  rows$live_message <- rep(NA_character_, nrow(rows))
+  for (i in seq_len(nrow(rows))) {
+    outcome <- run_assertion_check(load_machine(con, rows$sm_id[i]), rows[i, ])
+    rows$live[i] <- outcome$result
+    rows$live_message[i] <- outcome$message
+  }
+  rows
+}
+
+# Whether a requirement's verification holds: at least one check passes, and none fails.
+# A test counts by its latest current result; an assertion by how it runs now.
+requirement_verification <- function(con, requirement_id) {
+  cases <- requirement_evidence(con, requirement_id)
+  checks <- requirement_assertions(con, requirement_id)
+  passing <- sum(cases$result %in% "pass" & is.na(cases$stale)) + sum(checks$live %in% "pass")
+  failing <- sum(cases$result %in% c("fail", "error")) + sum(checks$live %in% c("fail", "error"))
+  list(verified = passing > 0L && failing == 0L, passing = passing, failing = failing,
+       linked = nrow(cases) + nrow(checks))
+}

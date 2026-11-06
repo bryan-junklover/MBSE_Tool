@@ -75,3 +75,33 @@ delete_sm_variable <- function(con, variable_id, author = "engineer") {
   if (length(used) > 0L) refuse(used[1], " uses ", variable$name, ". Change it first.")
   delete_entity(con, "sm_variable", variable_id, author)
 }
+
+# A new event must be handled, or knowingly ignored, in every state that isn't final, so
+# Completeness checks it from the start. Untick Must handle where it doesn't apply.
+add_sm_event <- function(con, sm_id, name, author = "engineer") {
+  name <- trimws(name)
+  if (!grepl("^[a-z][a-z0-9_]*$", name)) refuse("An event name is snake_case, like gnss_lost.")
+  if (name %in% DBI::dbGetQuery(con, "SELECT name FROM sm_event WHERE sm_id = ?", params = list(sm_id))$name) refuse("There's already an event called ", name, ".")
+  states <- DBI::dbGetQuery(con, "SELECT id FROM sm_state WHERE sm_id = ? AND kind <> 'final'", params = list(sm_id))$id
+  with_change_set(con, function(change_set) {
+    event <- write_sm_event(con, fields = list(sm_id = sm_id, name = name), author = author, note = "Added event", change_set = change_set)
+    for (state in states) write_sm_event_scope(con, paste(event$id, state, sep = "|"), list(), author, "In scope", change_set)
+    event
+  })
+}
+
+# A new state must handle, or knowingly ignore, every event the machine has.
+add_sm_state <- function(con, sm_id, name, author = "engineer") {
+  events <- DBI::dbGetQuery(con, "SELECT id FROM sm_event WHERE sm_id = ?", params = list(sm_id))$id
+  with_change_set(con, function(change_set) {
+    state <- save_state(con, fields = list(sm_id = sm_id, name = name), note = "Added state", change_set = change_set, author = author)
+    for (event in events) write_sm_event_scope(con, paste(event, state$id, sep = "|"), list(), author, "In scope", change_set)
+    state
+  })
+}
+
+# Events no state has to handle: Completeness can't check them.
+unscoped_events <- function(con, sm_id) {
+  DBI::dbGetQuery(con, "SELECT e.id, e.name FROM sm_event e WHERE e.sm_id = ?
+                          AND NOT EXISTS (SELECT 1 FROM sm_event_scope s WHERE s.event_id = e.id) ORDER BY e.name", params = list(sm_id))
+}

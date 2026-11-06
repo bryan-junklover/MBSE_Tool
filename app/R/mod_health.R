@@ -119,7 +119,8 @@ render_health <- function(health, input_id, next_id = "The next baseline") {
         unlist(lapply(seq_len(nrow(health$budgets)), function(i) {
           budget <- health$budgets[i, ]
           list(shiny::tags$span(budget$label),
-               shiny::tags$span(class = paste("mono", if (!budget$pass) "mb-gap"), sprintf("%s%s", budget$text, if (budget$pass) "" else " · FAIL")))
+               shiny::tags$span(class = paste("mono", if (!budget$pass || grepl("^excludes", budget$note %||% "")) "mb-gap"),
+                                budget_status_text(budget$text, budget$pass, budget$note)))
         }), recursive = FALSE),
         unlist(lapply(seq_len(nrow(health$analyses)), function(i) {
           row <- health$analyses[i, ]

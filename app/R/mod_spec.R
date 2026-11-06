@@ -58,12 +58,22 @@ spec_columns <- function() {
   )
 }
 
-render_evidence <- function(cases, ns) {
+render_evidence <- function(cases, ns, checks = NULL) {
   shiny::tags$section(
     class = "mb-panel",
     shiny::tags$div(class = "mb-head", shiny::tags$b("Verification"),
                     shiny::tags$button(type = "button", class = "mb-btn mb-btn-small mb-push", onclick = event_js(ns("add_case"), "new"), "Add test case…")),
-    if (nrow(cases) == 0L) shiny::tags$span(class = "mb-caption", "No test cases yet."),
+    if (nrow(cases) == 0L && (is.null(checks) || nrow(checks) == 0L)) shiny::tags$span(class = "mb-caption", "No test cases or assertions yet."),
+    # Assertions verify by simulation: checked now, and as last recorded.
+    if (!is.null(checks)) lapply(seq_len(nrow(checks)), function(i) {
+      check <- checks[i, ]
+      shiny::tags$div(
+        style = "display:flex;flex-direction:column;gap:4px",
+        shiny::tags$div(class = "mb-head", shiny::tags$span(class = "mono", check$id), shiny::tags$span(sprintf("%s · %s", check$machine, check$description))),
+        shiny::tags$span(class = if (check$live == "pass") "mb-check-pass" else "mb-check-fail", sprintf("Now: %s · %s", toupper(check$live), check$live_message)),
+        shiny::tags$span(class = "mb-caption", if (is.na(check$recorded)) "Not recorded yet. Run and record it on State machines." else sprintf("Recorded %s · %s", toupper(check$recorded), check$run_at))
+      )
+    }),
     lapply(seq_len(nrow(cases)), function(i) {
       case <- cases[i, ]
       shiny::tags$div(
@@ -191,7 +201,8 @@ mod_spec_server <- function(id, state) {
       db_dep(state, "model")
       row <- current()
       shiny::req(row)
-      render_evidence(requirement_evidence(con(), row$id), ns)
+      db_dep(state, "behavior")
+      render_evidence(requirement_evidence(con(), row$id), ns, requirement_assertions(con(), row$id))
     })
     shiny::observeEvent(input$add_case, {
       shiny::showModal(shiny::modalDialog(

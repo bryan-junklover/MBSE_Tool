@@ -207,7 +207,7 @@ mod_project_server <- function(id, state, workspace_dir) {
       simple_table(c("Budget", "Over", "Now / limit", ""),
                    lapply(seq_len(nrow(rows)), function(i) {
                      list(sprintf("%s, %s", rows$label[i], if (rows$comparison[i] == "max") "at most" else "at least"), rows$scope_name[i],
-                          shiny::tags$span(class = paste("mono", if (!rows$pass[i]) "mb-gap"), sprintf("%s%s", rows$text[i], if (rows$pass[i]) "" else " · FAIL")),
+                          shiny::tags$span(class = paste("mono", if (!rows$pass[i]) "mb-gap"), budget_status_text(rows$text[i], rows$pass[i], rows$note[i])),
                           confirm_button("Remove", ns("b_delete"), rows$id[i], sprintf("Remove the %s budget?", tolower(rows$label[i])),
                                          sprintf("%s no longer has a %s limit. Undo brings it back.", rows$scope_name[i], tolower(rows$label[i])),
                                          confirm = "Remove budget", class = "mb-btn mb-btn-small"))

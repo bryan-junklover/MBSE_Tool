@@ -240,6 +240,15 @@ mod_baselines_server <- function(id, state) {
           shiny::tagList(shiny::tags$p(class = "mb-gap", sprintf("It can't be created yet: %d blockers. Each link goes to where it's fixed.", nrow(blockers))),
                          render_blocker_groups(model_health(con())$blockers, ns("go")))
         },
+        if (ready) {
+          warnings <- baseline_warnings(con())
+          if (nrow(warnings) > 0L) {
+            shiny::tags$section(class = "mb-panel",
+                                shiny::tags$b(sprintf("Doesn't block, but worth knowing (%d)", nrow(warnings))),
+                                shiny::tags$ul(lapply(warnings$text, shiny::tags$li)),
+                                shiny::tags$span(class = "mb-caption", "These are written into the baseline's note, as what was known when it was taken."))
+          }
+        },
         if (ready) shiny::textInput(ns("baseline_name"), "Name"),
         if (ready) shiny::textAreaInput(ns("baseline_note"), "Note"),
         footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("create_confirm"), "Create baseline", class = "mb-btn mb-btn-primary", disabled = !ready))

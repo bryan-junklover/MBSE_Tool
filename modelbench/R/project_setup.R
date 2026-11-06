@@ -95,7 +95,7 @@ delete_property_def <- function(con, property_def_id, author = "engineer") {
 
 budget_list <- function(con) {
   status <- budget_status(con)
-  rows <- DBI::dbGetQuery(con, "SELECT b.id, b.comparison, b.requirement_id, e.name AS scope_name FROM budget b JOIN element e ON e.id = b.scope_element_id ORDER BY b.id")
+  rows <- DBI::dbGetQuery(con, "SELECT id, comparison, requirement_id FROM budget ORDER BY id")
   merge(status, rows, by = "id", sort = FALSE)
 }
 

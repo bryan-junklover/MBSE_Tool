@@ -15,10 +15,42 @@ baseline_blockers <- function(con) {
   )
 }
 
+# What doesn't block a baseline but should be seen before taking one. Each row is a kind
+# and a line in words. The list is written into the baseline's note when it's taken.
+baseline_warnings <- function(con) {
+  rows <- list()
+  add <- function(kind, text) if (length(text) > 0L) rows[[length(rows) + 1L]] <<- data.frame(kind = kind, text = text)
+  budgets <- budget_status(con)
+  add("budget", sprintf("%s over %s is over its limit: %s.", budgets$label[!budgets$pass], budgets$scope_name[!budgets$pass], budgets$text[!budgets$pass]))
+  incomplete <- !is.na(budgets$note) & grepl("^excludes", budgets$note)
+  add("budget", sprintf("%s over %s leaves out values still to be set (%s).", budgets$label[incomplete], budgets$scope_name[incomplete], budgets$note[incomplete]))
+  analyses <- analysis_status(con)
+  missed <- analyses[!analyses$pass, , drop = FALSE]
+  add("analysis", vapply(seq_len(nrow(missed)), function(i) sprintf("%s misses its limit: %s.", term_to_title(missed$analysis[i]), missed$text[i]), ""))
+  for (sm in DBI::dbGetQuery(con, "SELECT id FROM state_machine ORDER BY id")$id) {
+    checks <- live_assertions(con, sm)
+    add("assertion", sprintf("Assertion %s fails: %s", checks$id[checks$live_result != "pass"], checks$live_message[checks$live_result != "pass"]))
+    pairs <- unhandled_pairs(con, sm)
+    if (nrow(pairs) > 0L) add("state_machine", sprintf("%s has %d event/state pair%s nothing handles.", read_entity(con, "state_machine", sm)$name, nrow(pairs), if (nrow(pairs) == 1L) "" else "s"))
+  }
+  findings <- failure_findings(con)
+  open <- findings$rule %in% c("open_response", "handled_unlinked", "handled_unverified")
+  add("failure", findings$text[open])
+  unallocated <- DBI::dbGetQuery(con, "SELECT id FROM v_unallocated_requirements ORDER BY id")$id
+  if (length(unallocated) > 0L) add("requirement", sprintf("%d committed requirement%s %s allocated to nothing: %s.", length(unallocated),
+                                                         if (length(unallocated) == 1L) "" else "s", if (length(unallocated) == 1L) "is" else "are", paste(unallocated, collapse = ", ")))
+  do.call(rbind, c(list(data.frame(kind = character(0), text = character(0))), rows))
+}
+
 # Refused while blockers exist: returns them, and writes nothing.
-create_baseline <- function(con, name, note = NULL, author = "engineer") {
+# Warnings don't stop it; they're recorded in the note as what was known when it was taken.
+create_baseline <- function(con, name, note = NULL, author = "engineer", warnings = baseline_warnings(con)) {
   blockers <- baseline_blockers(con)
   if (nrow(blockers) > 0L) return(list(ok = FALSE, blockers = blockers))
+  if (nrow(warnings) > 0L) {
+    known <- paste(c(sprintf("Taken with %d known issue%s:", nrow(warnings), if (nrow(warnings) == 1L) "" else "s"), paste0("- ", warnings$text)), collapse = "\n")
+    note <- if (is.null(note) || !nzchar(trimws(note))) known else paste(trimws(note), known, sep = "\n\n")
+  }
   in_tx(con, {
     id <- allocate_id(con, "BL")
     .write_baseline_items(con, id, name, if (is.null(note)) NA_character_ else note, author)
