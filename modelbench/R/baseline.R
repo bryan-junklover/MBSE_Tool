@@ -155,11 +155,6 @@ rollback_to_baseline <- function(con, baseline_id, author = "engineer") {
     entities <- compare_entities(con, baseline_id, "working")
     change_set <- new_change_set(con)
     note <- sprintf("Rollback to %s", baseline_id)
-    additions <- Filter(function(e) e$status == "added", entities)
-    additions <- additions[order(-restore_order(vapply(additions, function(e) e$kind, "")))]
-    for (entity in additions) {
-      if (!is.null(read_entity(con, entity$kind, entity$id))) delete_entity(con, entity$kind, entity$id, author, note, change_set)
-    }
     restores <- Filter(function(e) e$status != "added", entities)
     restores <- restores[order(restore_order(vapply(restores, function(e) e$kind, "")))]
     # A restored parent goes in before its children.
@@ -178,6 +173,13 @@ rollback_to_baseline <- function(con, baseline_id, author = "engineer") {
     for (entity in restores) {
       data <- revision_data(con, entity$kind, entity$id, entity$rev_a)
       write_entity(con, entity$kind, entity$id, restorable_fields(entity$kind, data), author, note, change_set)
+    }
+    # Additions go last: until the rest is put back, kept items may still point at them, such
+    # as a component moved under a parent added since the baseline.
+    additions <- Filter(function(e) e$status == "added", entities)
+    additions <- additions[order(-restore_order(vapply(additions, function(e) e$kind, "")))]
+    for (entity in additions) {
+      if (!is.null(read_entity(con, entity$kind, entity$id))) delete_entity(con, entity$kind, entity$id, author, note, change_set)
     }
     list(safety = safety, change_set = change_set, area = "baseline", changed = length(entities))
   })

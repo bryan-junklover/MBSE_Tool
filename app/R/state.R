@@ -143,3 +143,25 @@ danger_zone <- function(...) shiny::tags$div(class = "mb-danger-zone", ...)
 aria_label <- function(tag, element, label) {
   htmltools::tagQuery(tag)$find(element)$addAttrs(`aria-label` = label)$allTags()
 }
+
+# A delete's consequences in words, from delete_effects(): what goes with it, and what stays
+# but loses its link. A refusal says why instead, and the button is still offered so the
+# reason shows on the toast.
+DELETE_LABELS <- c(element = "part", port = "port", connector = "connector", seq_lifeline = "scenario lifeline", sm_transition = "transition",
+                   seq_step = "scenario step", state_machine = "state machine", budget = "budget", failure_mode = "failure mode",
+                   failure_waiver = "set-aside check", link = "link", property_value = "property value", interface_field = "field",
+                   analysis_limit = "analysis limit")
+CLEAR_LABELS <- c(requirement = "requirement keeps its text but no longer has it as its actor", act_node = "activity step loses its performer",
+                  port = "port loses its interface", seq_step = "scenario step loses its interface", sm_event = "event loses its interface",
+                  budget = "budget no longer names the requirement", sm_assertion = "assertion no longer names the requirement")
+delete_effects_text <- function(effects) {
+  if (!is.null(effects$refusal)) return(paste(effects$refusal, "Nothing will be deleted."))
+  plural <- function(n, word) sprintf("%d %s%s", n, word, if (n == 1L) "" else "s")
+  removed <- effects$removed[names(effects$removed) %in% names(DELETE_LABELS)]
+  goes <- vapply(names(removed), function(kind) plural(removed[[kind]], DELETE_LABELS[[kind]]), "")
+  cleared <- effects$cleared[names(effects$cleared) %in% names(CLEAR_LABELS)]
+  keeps <- vapply(names(cleared), function(kind) sprintf("%d %s", cleared[[kind]], CLEAR_LABELS[[kind]]), "")
+  paste(c(if (length(goes) > 0L) sprintf("It goes with its %s.", paste(goes, collapse = ", ")) else "Nothing else goes with it.",
+          if (length(keeps) > 0L) sprintf("Kept, but unlinked: %s.", paste(keeps, collapse = "; ")),
+          "Undo brings it all back."), collapse = " ")
+}

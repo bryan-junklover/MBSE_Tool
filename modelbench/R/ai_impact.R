@@ -146,9 +146,11 @@ stakeholder_meters <- function(con) {
   status <- budget_status(con)
   rows <- lapply(seq_len(nrow(status)), function(i) {
     name <- budgets$name[match(status$id[i], budgets$id)]
+    known <- !is.na(status$value[i])
     list(label = if (name %in% names(PLAIN_MEASURES)) unname(PLAIN_MEASURES[name]) else status$label[i],
-         value_text = sprintf("%s of %s %s", format_amount(status$value[i], status$limit[i]), format_amount(status$limit[i]), status$unit[i]),
-         fraction = min(1, status$value[i] / status$limit[i]), pass = status$pass[i], line = if (status$pass[i]) "Within limit" else "Over the limit. A decision is needed.")
+         value_text = if (known) sprintf("%s of %s %s", format_amount(status$value[i], status$limit[i]), format_amount(status$limit[i]), status$unit[i]) else "Not known yet",
+         fraction = if (known) min(1, status$value[i] / status$limit[i]) else 0, pass = status$pass[i],
+         line = if (!known) "Waiting on a value." else if (status$pass[i]) "Within limit" else "Over the limit. A decision is needed.")
   })
   analyses <- analysis_status(con)
   c(rows, lapply(seq_len(nrow(analyses)), function(i) {

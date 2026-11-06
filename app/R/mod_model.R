@@ -166,7 +166,7 @@ render_hosting <- function(hosting, ns) {
                  }))
 }
 
-render_element_inspector <- function(row, properties, ports, requirements, stereotypes, addable, pinned, ns, hosting = NULL) {
+render_element_inspector <- function(row, properties, ports, requirements, stereotypes, addable, pinned, ns, hosting = NULL, delete_text = NULL) {
   text_or_blank <- function(x) if (is.na(x)) "" else x
   field <- function(name) change_js(ns("element_change"), list(field = name))
   unreviewed <- row$review_state == "unreviewed"
@@ -232,8 +232,7 @@ render_element_inspector <- function(row, properties, ports, requirements, stere
                                         onchange = sprintf("Shiny.setInputValue('%s', {on: this.checked, n: Math.random()}, {priority: 'event'})", ns("pin"))),
                       " Keep this position on auto-layout"),
     danger_zone(confirm_button(sprintf("Delete %s…", row$name), ns("delete_element"), row$id, sprintf("Delete %s?", row$name),
-                               sprintf("It goes from the model with its %d port%s and %d requirement link%s. Undo brings it back.", nrow(ports), if (nrow(ports) == 1L) "" else "s",
-                                       nrow(requirements), if (nrow(requirements) == 1L) "" else "s"),
+                               if (!is.null(delete_text)) delete_text else sprintf("It goes from the model with its %d port%s. Undo brings it back.", nrow(ports), if (nrow(ports) == 1L) "" else "s"),
                                confirm = "Delete from the model"))
   )
 }
@@ -537,7 +536,8 @@ mod_model_server <- function(id, state, mode = "structure") {
         list(kind = "host", software = hosted_software(con(), row$id))
       }
       details <- render_element_inspector(row, properties, element_ports(con(), chosen$ids), element_requirements(con(), chosen$ids),
-                                          stats::setNames(stereotypes$id, stereotypes$name), stats::setNames(addable$id, addable$label), pinned, ns, hosting)
+                                          stats::setNames(stereotypes$id, stereotypes$name), stats::setNames(addable$id, addable$label), pinned, ns, hosting,
+                                          delete_effects_text(delete_effects(con(), "element", row$id)))
       if (row$kind != "function") return(details)
       db_dep(state, "spec")
       db_dep(state, "ai")

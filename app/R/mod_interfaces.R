@@ -146,12 +146,10 @@ mod_interfaces_server <- function(id, state) {
       row <- current()
       shiny::req(row)
       used <- interface_where_used(con(), row$id)
-      n <- nrow(used$ports)
-      consequence <- if (n == 0L) "No ports use it." else sprintf("%d port%s use%s it and will have no interface.", n, if (n == 1L) "" else "s", if (n == 1L) "s" else "")
       shiny::tagList(
         render_where_used(used),
         danger_zone(confirm_button(sprintf("Delete %s…", row$name), ns("delete"), row$id, sprintf("Delete %s?", row$name),
-                                   paste(consequence, "Undo brings it back."),
+                                   delete_effects_text(delete_effects(con(), "interface", row$id)),
                                    confirm = "Delete interface"))
       )
     })

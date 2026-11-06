@@ -260,7 +260,8 @@ mod_baselines_server <- function(id, state) {
       if (is.na(from)) return(refusal_toast("There's no baseline to roll back to."))
       shiny::showModal(shiny::modalDialog(
         title = sprintf("Roll back to %s?", from),
-        shiny::tags$p(sprintf("The model goes back to how it was at %s, as new revisions: history isn't rewritten. Draft requirements stay as they are.", from)),
+        shiny::tags$p(sprintf(paste("The model goes back to how it was at %s, as new revisions: history isn't rewritten.",
+                                    "Draft requirements stay as they are, but one committed since %s is removed; the safety baseline keeps it."), from, from)),
         shiny::tags$p(sprintf("It first saves the current state as safety baseline %s. Roll back to that to undo this.", next_baseline_id(con()))),
         footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("rollback_confirm"), sprintf("Roll back to %s", from), class = "mb-btn mb-btn-primary"))
       ))

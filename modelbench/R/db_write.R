@@ -172,14 +172,11 @@ write_entity <- function(con, kind, id = NULL, fields = list(), author = "engine
   })
 }
 
+# What goes with an entity. Things that only refer to it (property values, failure modes,
+# waivers, links) come first, so they're deleted before its structural children and, since
+# Undo replays a change set backwards, restored after them.
 direct_dependents <- function(con, kind, id) {
   found <- list()
-  for (child in ENTITY_CHILDREN[[kind]]) {
-    ids <- DBI::dbGetQuery(con, sprintf("SELECT %s AS id FROM %s WHERE %s = ?", entity_id_sql(con, child[1]),
-                                        quote_ident(con, child[1]), quote_ident(con, child[2])),
-                           params = list(id))$id
-    found <- c(found, lapply(ids, function(x) list(kind = child[1], id = x)))
-  }
   if (kind %in% PROPERTY_OWNER_KINDS) {
     ids <- DBI::dbGetQuery(con, "SELECT id FROM property_value WHERE owner_kind = ? AND owner_id = ?",
                            params = list(kind, id))$id
@@ -189,11 +186,22 @@ direct_dependents <- function(con, kind, id) {
     ids <- DBI::dbGetQuery(con, "SELECT id FROM failure_mode WHERE subject_kind = ? AND subject_id = ?", params = list(kind, id))$id
     found <- c(found, lapply(ids, function(x) list(kind = "failure_mode", id = x)))
   }
+  if (kind %in% WAIVER_SUBJECT_KINDS) {
+    ids <- DBI::dbGetQuery(con, "SELECT rule || '|' || subject_kind || '|' || subject_id AS id FROM failure_waiver WHERE subject_kind = ? AND subject_id = ?",
+                           params = list(kind, id))$id
+    found <- c(found, lapply(ids, function(x) list(kind = "failure_waiver", id = x)))
+  }
   if (kind %in% LINK_END_KINDS) {
     ids <- DBI::dbGetQuery(con, paste("SELECT id FROM link WHERE (source_kind = ?1 AND source_id = ?2)",
                                      "OR (target_kind = ?1 AND target_id = ?2)"),
                            params = list(kind, id))$id
     found <- c(found, lapply(ids, function(x) list(kind = "link", id = x)))
+  }
+  for (child in ENTITY_CHILDREN[[kind]]) {
+    ids <- DBI::dbGetQuery(con, sprintf("SELECT %s AS id FROM %s WHERE %s = ?", entity_id_sql(con, child[1]),
+                                        quote_ident(con, child[1]), quote_ident(con, child[2])),
+                           params = list(id))$id
+    found <- c(found, lapply(ids, function(x) list(kind = child[1], id = x)))
   }
   found
 }
@@ -227,21 +235,98 @@ delete_one <- function(con, kind, id, author, note, change_set) {
   invisible(NULL)
 }
 
-# Deletes an entity and its dependents, each with a final `deleted` revision.
+# Rows outside the delete that refer to something in it, and the fields to write so they
+# no longer do (REFERENCE_CLEARS).
+reference_clears <- function(con, going) {
+  doomed <- vapply(going, function(e) paste(e$kind, e$id), "")
+  updates <- list()
+  for (entity in going) {
+    for (rule in REFERENCE_CLEARS[[entity$kind]]) {
+      rows <- DBI::dbGetQuery(con, sprintf("SELECT %s AS id FROM %s WHERE %s = ?", entity_id_sql(con, rule$kind), quote_ident(con, rule$kind),
+                                           quote_ident(con, rule$column)), params = list(entity$id))$id
+      if (length(rows) == 0L) next
+      for (row in rows[!paste(rule$kind, rows) %in% doomed]) {
+        value <- if (identical(rule$to, "parent")) read_entity(con, entity$kind, entity$id)$parent_id else NA_character_
+        fields <- stats::setNames(list(if (is.null(value)) NA_character_ else value), rule$column)
+        for (also in rule$also) fields[[also]] <- NA_character_
+        updates[[length(updates) + 1L]] <- list(kind = rule$kind, id = row, fields = fields)
+      }
+    }
+  }
+  updates
+}
+
+# What would stop a delete, in plain words, or NULL. Recorded evidence and assertions
+# that start or end in a state aren't removed quietly.
+delete_refusal <- function(con, kind, id, going) {
+  ids_of <- function(k) vapply(Filter(function(e) e$kind == k, going), function(e) e$id, "")
+  cases <- c(if (kind == "test_case") id, ids_of("test_case"))
+  if (length(cases) > 0L) {
+    held <- DBI::dbGetQuery(con, sprintf("SELECT DISTINCT test_case_id FROM verification_record WHERE test_case_id IN (%s)",
+                                         paste(DBI::dbQuoteString(con, cases), collapse = ", ")))$test_case_id
+    if (length(held) > 0L) return(sprintf("%s has recorded results. They're evidence, so it can't be deleted.", held[1]))
+  }
+  requirements <- c(if (kind == "requirement") id, ids_of("requirement"))
+  if (length(requirements) > 0L) {
+    held <- DBI::dbGetQuery(con, sprintf("SELECT DISTINCT requirement_id FROM verification_record WHERE requirement_id IN (%s)",
+                                         paste(DBI::dbQuoteString(con, requirements), collapse = ", ")))$requirement_id
+    if (length(held) > 0L) return(sprintf("%s has recorded test results. They're evidence, so it can't be deleted.", held[1]))
+  }
+  states <- c(if (kind == "sm_state") id, ids_of("sm_state"))
+  if (length(states) > 0L) {
+    assertions <- DBI::dbGetQuery(con, "SELECT id, sm_id, script_json, expect_json FROM sm_assertion")
+    going_machines <- c(if (kind == "state_machine") id, ids_of("state_machine"))
+    for (i in seq_len(nrow(assertions))) {
+      if (assertions$sm_id[i] %in% going_machines || assertions$id[i] %in% ids_of("sm_assertion")) next
+      text <- paste(assertions$script_json[i], assertions$expect_json[i])
+      used <- states[vapply(states, function(s) grepl(sprintf("\"%s\"", s), text, fixed = TRUE), TRUE)]
+      if (length(used) > 0L) return(sprintf("Assertion %s starts or ends in %s. Change or delete the assertion first.", assertions$id[i], used[1]))
+    }
+  }
+  NULL
+}
+
+# Clears glossary aliases and resolved requirement terms that point at elements going.
+# Both are derived or plain data, so they have no revisions.
+clear_plain_references <- function(con, going) {
+  elements <- vapply(Filter(function(e) e$kind == "element", going), function(e) e$id, "")
+  if (length(elements) == 0L) return(invisible(NULL))
+  marks <- paste(rep("?", length(elements)), collapse = ", ")
+  DBI::dbExecute(con, sprintf("UPDATE glossary SET element_id = NULL WHERE element_id IN (%s)", marks), params = as.list(elements))
+  DBI::dbExecute(con, sprintf("UPDATE requirement_term SET resolution = 'unresolved', element_id = NULL WHERE element_id IN (%s)", marks), params = as.list(elements))
+  invisible(NULL)
+}
+
+# What a delete takes with it and what it clears, for the confirm dialog: one entry per kind.
+delete_effects <- function(con, kind, id) {
+  going <- entity_dependents(con, kind, id)
+  clears <- reference_clears(con, c(list(list(kind = kind, id = id)), going))
+  count <- function(rows) if (length(rows) == 0L) integer(0) else table(vapply(rows, function(e) e$kind, ""))
+  list(removed = count(going), cleared = count(clears), refusal = delete_refusal(con, kind, id, going))
+}
+
+# Deletes an entity and its dependents, each with a final `deleted` revision. References
+# that can be cleared are cleared first, in the same change set, so Undo restores them.
 delete_entity <- function(con, kind, id, author = "engineer", note = NULL, change_set = NULL) {
   check_kind(kind)
   if (is.null(read_entity(con, kind, id))) refuse("Can't delete ", kind, " ", id, ": it doesn't exist.")
-  if (kind == "requirement") {
-    held <- DBI::dbGetQuery(con, "SELECT id FROM sm_assertion WHERE requirement_id = ?", params = list(id))$id
-    if (length(held) > 0L) refuse("Can't delete ", id, ": assertion ", held[1], " checks it.")
-  }
-  in_tx(con, {
+  going <- entity_dependents(con, kind, id)
+  refusal <- delete_refusal(con, kind, id, going)
+  if (!is.null(refusal)) refuse("Can't delete ", id, ": ", refusal)
+  tryCatch(in_tx(con, {
     if (is.null(change_set)) change_set <- new_change_set(con)
-    for (dependent in entity_dependents(con, kind, id)) {
+    for (update in reference_clears(con, c(list(list(kind = kind, id = id)), going))) {
+      write_entity(con, update$kind, update$id, update$fields, author, if (is.null(note)) sprintf("%s %s deleted", kind, id) else note, change_set)
+    }
+    clear_plain_references(con, c(list(list(kind = kind, id = id)), going))
+    for (dependent in going) {
       delete_one(con, dependent$kind, dependent$id, author, note, change_set)
     }
     delete_one(con, kind, id, author, note, change_set)
     list(kind = kind, id = id, change_set = change_set, area = unname(ENTITY_AREAS[kind]))
+  }), error = function(e) {
+    if (inherits(e, "modelbench_refused") || !grepl("constraint failed", conditionMessage(e))) stop(e)
+    refuse("Can't delete ", id, ": something else in the model still refers to it.")
   })
 }
 

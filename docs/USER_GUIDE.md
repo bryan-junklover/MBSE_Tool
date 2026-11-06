@@ -64,7 +64,18 @@ In a narrow window, columns open over the page from their rails instead, and Esc
   put.
 - Connector labels hide when the diagram is too small to read them.
 
-**Undo.** Every model edit can be undone with **Undo**, including edits made in inspectors.
+**Undo.** The **Undo** and **Redo** buttons are on the Model and Behavior diagram screens. They
+undo model edits made anywhere in the session, most recent first: structure, interfaces, links,
+behaviour, failure modes, and the properties and budgets in Project. The stack starts afresh when
+you switch project or roll back.
+
+Some changes can't be undone yet:
+- committing or saving a requirement, and edits in the Specification inspector;
+- test cases and recorded results;
+- imports;
+- dismissing an AI item;
+- the glossary, units, ID prefixes and scope.
+
 Anything that deletes asks first, and says what goes with it.
 
 **Jumping and coming back.** Links on Health, the Review queue and elsewhere take you to the
@@ -254,7 +265,8 @@ transition.
   `prop(Power System.battery_capacity) > 4000`. A transition can wait for its condition to hold
   for a time.
 - **Completeness** lists each event/state pair that needs a transition, or an **Ignore, with my
-  note**.
+  note**. It counts only the pairs you've put in scope: select a state, and tick the events it
+  **Must handle**. A new event isn't in scope anywhere until you tick it.
 - **Checks** holds assertions. **Add assertion…** builds one from a start state, a list of events
   and the state it should end in, optionally tied to a requirement. **Run and record** runs them
   all, and a requirement's checks run live.
@@ -336,7 +348,8 @@ The AI's questions and sketches, plus structural gaps the code finds.
   where they start.
 - Select a change to see what it reaches. **Rate and explain with AI** adds a narrative.
 - **Roll back…** puts the model back as it was at a baseline. It saves a safety baseline first,
-  so a rollback can itself be undone.
+  so a rollback can itself be undone. Requirements committed since the baseline are removed,
+  even ones that were drafts then; the safety baseline keeps them.
 - **Create baseline** is enabled once nothing blocks it. Its button names the blockers until then.
 
 ### Documents

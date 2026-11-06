@@ -168,12 +168,15 @@ Then describe the logger's modes. Open **Behavior › State machines**.
    snake_case.
 4. **Add transitions.** Drag between a state's handles, such as *Sleeping* to *Measuring* on
    *timer*. Give a transition a guard or an effect in the inspector if it needs one.
-5. **Check completeness.** The **Completeness** tab lists each event a state doesn't handle yet.
-   Add a transition, or **Ignore, with my note** when ignoring it is safe. For example,
-   *link_lost* while *Sleeping*.
-6. **Try it.** In the simulator under the canvas, fire events and watch the state change. Open
+5. **Say what each state must handle.** Select a state and, under **Must handle**, tick the events
+   it has to respond to. For example, *timer* in *Sleeping*, and *link_lost* in *Sending*.
+6. **Check completeness.** The **Completeness** tab lists each ticked event that has no transition
+   from its state yet. Add a transition, or **Ignore, with my note** when ignoring it is safe. An
+   event you haven't ticked anywhere isn't checked, so an empty list only means the ticked ones
+   are covered.
+7. **Try it.** In the simulator under the canvas, fire events and watch the state change. Open
    the trace to see each step.
-7. **Make it a check.** **Add assertion…** records a start state, events and an expected state,
+8. **Make it a check.** **Add assertion…** records a start state, events and an expected state,
    tied to a requirement. For example: from *Sending*, *link_lost* ends in *Sleeping*. **Run and
    record** runs every assertion.
 

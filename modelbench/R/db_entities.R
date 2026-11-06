@@ -87,7 +87,8 @@ entity_prefix <- function(con, kind, fields) {
 # core must write their final revisions first (SCHEMA §6).
 ENTITY_CHILDREN <- list(
   stereotype = list(c("property_def", "stereotype_id")),
-  element = list(c("port", "element_id"), c("state_machine", "owner_element_id")),
+  element = list(c("port", "element_id"), c("state_machine", "owner_element_id"), c("element", "parent_id"),
+                 c("seq_lifeline", "element_id"), c("budget", "scope_element_id"), c("analysis_limit", "scope_id")),
   interface = list(c("interface_field", "interface_id")),
   port = list(c("connector", "source_port_id"), c("connector", "target_port_id")),
   scenario = list(c("seq_lifeline", "scenario_id"), c("seq_step", "scenario_id"),
@@ -102,11 +103,26 @@ ENTITY_CHILDREN <- list(
                   c("sm_ignore", "event_id"))
 )
 
+# References that a delete clears rather than following: the row stays, minus its link to
+# what went. `to` is "parent" to re-point at the deleted row's own parent instead of NULL.
+REFERENCE_CLEARS <- list(
+  element = list(list(kind = "requirement", column = "actor_element_id"),
+                 list(kind = "act_node", column = "performer_element_id")),
+  interface = list(list(kind = "port", column = "interface_id"),
+                   list(kind = "seq_step", column = "interface_id", also = "field_name"),
+                   list(kind = "sm_event", column = "interface_id", also = "field_name")),
+  requirement = list(list(kind = "requirement", column = "parent_id", to = "parent"),
+                     list(kind = "budget", column = "requirement_id"),
+                     list(kind = "analysis_limit", column = "requirement_id"),
+                     list(kind = "sm_assertion", column = "requirement_id"))
+)
+
 PROPERTY_OWNER_KINDS <- c("element", "connector", "interface", "requirement")
 LINK_END_KINDS <- c("requirement", "element", "connector", "interface", "scenario",
                     "state_machine", "test_case", "sm_assertion", "failure_mode", "sm_event", "sm_transition")
 
 # What a failure mode can be about, and what each failure link may point at.
 FAILURE_SUBJECT_KINDS <- c("element", "interface", "port", "sm_state")
+WAIVER_SUBJECT_KINDS <- c("port", "element", "interface_field")
 FAILURE_LINK_TARGETS <- list(detected_by = c("sm_event", "requirement", "test_case"),
                              handled_by = c("sm_transition", "requirement", "element"))

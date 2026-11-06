@@ -71,13 +71,19 @@ budget_status <- function(con) {
   rows <- lapply(seq_len(nrow(budgets)), function(i) {
     budget <- budgets[i, ]
     result <- rollup(con, budget$property, budget$scope_element_id)
-    value <- unit_conversion(con, result$value, result$unit, budget$unit)
-    pass <- meets_limit(value, budget$limit_value, budget$comparison)
-    note <- if (result$excluded_placeholders > 0L) sprintf("excludes %d placeholder", result$excluded_placeholders) else NA_character_
+    # A largest or smallest roll-up with nothing recorded yet has no value. That isn't a
+    # failure, so it passes and says so.
+    known <- !is.na(result$value)
+    value <- if (known) unit_conversion(con, result$value, result$unit, budget$unit) else NA_real_
+    pass <- !known || meets_limit(value, budget$limit_value, budget$comparison)
+    note <- if (!known) "no values yet" else if (result$excluded_placeholders > 0L) sprintf("excludes %d placeholder", result$excluded_placeholders) else NA_character_
     data.frame(id = budget$id, label = budget$label, scope = budget$scope_element_id, value = value,
                limit = budget$limit_value, unit = budget$unit, pass = pass, note = note,
-               text = sprintf("%s / %s %s", format_amount(value, budget$limit_value),
-                              format_amount(budget$limit_value), budget$unit),
+               text = if (known) {
+                 sprintf("%s / %s %s", format_amount(value, budget$limit_value), format_amount(budget$limit_value), budget$unit)
+               } else {
+                 sprintf("no values yet / %s %s", format_amount(budget$limit_value), budget$unit)
+               },
                stringsAsFactors = FALSE)
   })
   do.call(rbind, c(list(data.frame(id = character(0), label = character(0), scope = character(0), value = numeric(0),

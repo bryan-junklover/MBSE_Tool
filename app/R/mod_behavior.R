@@ -951,9 +951,7 @@ mod_machines_server <- function(id, state) {
         }),
         if (!identical(row$id, m$initial_state_id)) shiny::tags$div(shiny::tags$button(type = "button", class = "mb-btn", onclick = event_js(ns("make_start"), row$id), "Make start state")),
         danger_zone(confirm_button(sprintf("Delete %s…", row$name), ns("delete_state"), row$id, sprintf("Delete %s?", row$name),
-                                   sprintf("%s and the %d transition%s into or out of it go from the state machine. Undo brings them back.", row$name,
-                                           sum(m$transitions$from_state_id == row$id | m$transitions$to_state_id == row$id),
-                                           if (sum(m$transitions$from_state_id == row$id | m$transitions$to_state_id == row$id) == 1L) "" else "s"),
+                                   delete_effects_text(delete_effects(con(), "sm_state", row$id)),
                                    confirm = "Delete state"))
       )
     })
