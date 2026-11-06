@@ -94,6 +94,7 @@ render_health <- function(health, input_id, next_id = "The next baseline") {
         health_row("Components", health$architecture$components, structure, input_id, problem = FALSE),
         health_row("Unconnected ports", health$architecture$unconnected_ports, structure, input_id),
         health_row("Components with no requirements", health$architecture$no_requirements, structure, input_id),
+        health_row("Software with nothing to run on", health$architecture$unhosted, structure, input_id),
         health_row("Interfaces", health$architecture$interfaces, list(place = "interfaces"), input_id, problem = FALSE),
         health_row("Gate findings", health$architecture$gate_findings, structure, input_id)
       )),

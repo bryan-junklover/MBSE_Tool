@@ -176,10 +176,13 @@ structure_view <- function(con, view_id = "VW-all", root = default_structure_roo
   edges$stub <- is.na(edges$source_holder) | is.na(edges$target_holder)
 
   unconnected <- DBI::dbGetQuery(con, "SELECT port_id, element_id, name FROM v_unconnected_ports")
-  nodes$gap <- nodes$id %in% unconnected$element_id
+  unhosted <- DBI::dbGetQuery(con, "SELECT id FROM v_unhosted_software")$id
+  nodes$gap <- nodes$id %in% c(unconnected$element_id, unhosted)
   nodes$gap_note <- vapply(nodes$id, function(id) {
     held <- unconnected$name[unconnected$element_id == id]
-    if (length(held) == 0L) NA_character_ else sprintf("%s has no connector", paste(held, collapse = ", "))
+    notes <- c(if (length(held) > 0L) sprintf("%s has no connector", paste(held, collapse = ", ")),
+               if (id %in% unhosted) "Nothing recorded for it to run on")
+    if (length(notes) == 0L) NA_character_ else paste(notes, collapse = "; ")
   }, "", USE.NAMES = FALSE)
 
   stored <- layout_rows(con, view_id)
@@ -328,6 +331,7 @@ model_health <- function(con) {
           SELECT 1 FROM link l WHERE l.link_type = 'satisfied_by' AND l.target_id = e.id)",
         as.character(DBI::dbQuoteString(con, if (is.na(top)) "" else top)))),
       interfaces = count_of(con, "SELECT count(*) AS n FROM interface WHERE layer = 'physical'"),
+      unhosted = count_of(con, "SELECT count(*) AS n FROM v_unhosted_software"),
       gate_findings = nrow(element_gate_findings(con))
     ),
     functional = list(
@@ -607,6 +611,67 @@ allocation_matrix <- function(con) {
   links <- DBI::dbGetQuery(con, "SELECT id, source_id, target_id FROM link WHERE link_type = 'allocated_to' AND source_kind = 'element'")
   rows$unallocated <- !rows$id %in% links$source_id
   list(rows = rows, columns = columns, links = links)
+}
+
+# --- Software and the hardware it runs on (hosted_on links) ---
+
+# Hosts are hardware components, or external equipment the system doesn't own.
+host_choices <- function(con, element_id = NA_character_) {
+  hosts <- DBI::dbGetQuery(con, "SELECT id, name FROM element
+                                  WHERE (kind = 'component' AND domain IN ('hw', 'hw_sw')) OR kind = 'external'
+                                  ORDER BY kind = 'external', sort_order, name")
+  hosts[!hosts$id %in% c(element_id, default_structure_root(con)), , drop = FALSE]
+}
+
+# Why `element_id` can't run on `host_id`, or NA when it can.
+hosting_problem <- function(con, element_id, host_id) {
+  element <- DBI::dbGetQuery(con, "SELECT id, name, kind, domain FROM element WHERE id = ?", params = list(element_id))
+  host <- DBI::dbGetQuery(con, "SELECT id, name, kind, domain FROM element WHERE id = ?", params = list(host_id))
+  if (nrow(element) == 0L) return(sprintf("%s isn't in the model.", element_id))
+  if (nrow(host) == 0L) return(sprintf("%s isn't in the model.", host_id))
+  if (element$kind != "component" || !identical(element$domain, "sw")) {
+    return(sprintf("%s isn't a software component, so it doesn't run on anything. Set its domain to Software first.", element$name))
+  }
+  if (identical(element_id, host_id)) return(sprintf("%s can't run on itself.", element$name))
+  if (!(host$kind == "external" || (host$kind == "component" && host$domain %in% c("hw", "hw_sw")))) {
+    return(sprintf("%s can't run on %s, which isn't hardware.", element$name, host$name))
+  }
+  NA_character_
+}
+
+# Records where software runs. One host each: a new host replaces the old one, and an
+# empty `host_id` clears it.
+host_software <- function(con, element_id, host_id, author = "engineer") {
+  if (!is.null(host_id) && nzchar(host_id)) {
+    problem <- hosting_problem(con, element_id, host_id)
+    if (!is.na(problem)) stop(problem, call. = FALSE)
+  }
+  with_change_set(con, function(change_set) {
+    old <- DBI::dbGetQuery(con, "SELECT id FROM link WHERE link_type = 'hosted_on' AND source_kind = 'element' AND source_id = ?",
+                           params = list(element_id))$id
+    for (id in old) delete_entity(con, "link", id, author, NULL, change_set)
+    if (is.null(host_id) || !nzchar(host_id)) return(list(change_set = change_set, id = NA_character_, area = "model"))
+    write_link(con, fields = list(link_type = "hosted_on", source_kind = "element", source_id = element_id,
+                                  target_kind = "element", target_id = host_id), author = author, change_set = change_set)
+  })
+}
+
+software_host <- function(con, element_id) {
+  DBI::dbGetQuery(con, "SELECT l.id, e.id AS host_id, e.name FROM link l JOIN element e ON e.id = l.target_id
+                         WHERE l.link_type = 'hosted_on' AND l.source_kind = 'element' AND l.source_id = ?", params = list(element_id))
+}
+
+hosted_software <- function(con, host_id) {
+  DBI::dbGetQuery(con, "SELECT e.id, e.name FROM link l JOIN element e ON e.id = l.source_id
+                         WHERE l.link_type = 'hosted_on' AND l.target_kind = 'element' AND l.target_id = ? ORDER BY e.sort_order, e.name",
+                  params = list(host_id))
+}
+
+# hosted_on links that no longer make sense, say after a domain changed.
+hosting_findings <- function(con) {
+  links <- DBI::dbGetQuery(con, "SELECT id, source_id, target_id FROM link WHERE link_type = 'hosted_on'")
+  problems <- vapply(seq_len(nrow(links)), function(i) hosting_problem(con, links$source_id[i], links$target_id[i]), "")
+  data.frame(kind = rep("link", sum(!is.na(problems))), id = links$id[!is.na(problems)], problem = problems[!is.na(problems)])
 }
 
 realize_flow <- function(con, flow_id, connector_id, author = "engineer") {

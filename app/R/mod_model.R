@@ -150,7 +150,23 @@ select_tag <- function(choices, selected, onchange, blank = NULL, label = NULL) 
   }))
 }
 
-render_element_inspector <- function(row, properties, ports, requirements, stereotypes, addable, pinned, ns) {
+# Where software runs: a choice for software, a list for hardware that runs some.
+render_hosting <- function(hosting, ns) {
+  if (is.null(hosting)) return(NULL)
+  if (hosting$kind == "software") {
+    unhosted <- length(hosting$selected) == 0L
+    return(shiny::tagList(labelled("Runs on", select_tag(hosting$choices, if (unhosted) "" else hosting$selected,
+                                                         change_js(ns("host"), list()), "Not recorded", label = "Runs on")),
+                          if (unhosted) shiny::tags$span(class = "mb-gap", style = "font-size:13px", "Gap: nothing recorded for it to run on.")))
+  }
+  if (nrow(hosting$software) == 0L) return(NULL)
+  shiny::tagList(shiny::tags$div(class = "mb-label", "Software running here"),
+                 lapply(seq_len(nrow(hosting$software)), function(i) {
+                   shiny::tags$div(shiny::tags$span(class = "mono", hosting$software$id[i]), " ", hosting$software$name[i])
+                 }))
+}
+
+render_element_inspector <- function(row, properties, ports, requirements, stereotypes, addable, pinned, ns, hosting = NULL) {
   text_or_blank <- function(x) if (is.na(x)) "" else x
   field <- function(name) change_js(ns("element_change"), list(field = name))
   unreviewed <- row$review_state == "unreviewed"
@@ -171,6 +187,7 @@ render_element_inspector <- function(row, properties, ports, requirements, stere
     },
     labelled("Stereotype", select_tag(stereotypes, text_or_blank(row$stereotype_id), field("stereotype_id"), "None")),
     labelled("Domain", select_tag(ELEMENT_DOMAINS, text_or_blank(row$domain), field("domain"), "Not set")),
+    render_hosting(hosting, ns),
     labelled("Status", select_tag(ELEMENT_STATUSES, row$status, field("status"))),
     labelled("How many", shiny::tags$input(type = "text", value = row$multiplicity, onchange = field("multiplicity"))),
     labelled("Description", shiny::tags$textarea(rows = 2, onchange = field("description"), text_or_blank(row$description))),
@@ -506,8 +523,14 @@ mod_model_server <- function(id, state, mode = "structure") {
       addable <- defs[!defs$id %in% held, , drop = FALSE]
       stored <- layout_rows(con(), view_id(), chosen$ids)
       pinned <- nrow(stored) == 1L && grepl('"pinned":true', stored$extra_json, fixed = TRUE)
+      hosting <- if (row$kind == "component" && identical(row$domain, "sw")) {
+        hosts <- host_choices(con(), row$id)
+        list(kind = "software", choices = stats::setNames(hosts$id, hosts$name), selected = software_host(con(), row$id)$host_id)
+      } else if (row$kind %in% c("component", "external")) {
+        list(kind = "host", software = hosted_software(con(), row$id))
+      }
       details <- render_element_inspector(row, properties, element_ports(con(), chosen$ids), element_requirements(con(), chosen$ids),
-                                          stats::setNames(stereotypes$id, stereotypes$name), stats::setNames(addable$id, addable$label), pinned, ns)
+                                          stats::setNames(stereotypes$id, stereotypes$name), stats::setNames(addable$id, addable$label), pinned, ns, hosting)
       if (row$kind != "function") return(details)
       db_dep(state, "spec")
       db_dep(state, "ai")
@@ -581,6 +604,7 @@ mod_model_server <- function(id, state, mode = "structure") {
       written <- model_edit(state, keep_candidate(con(), input$keep_link$id, input$keep_link$handle, input$keep_link$note), "link")
       if (!is.null(written)) invalidate_db(state, "ai")
     })
+    shiny::observeEvent(input$host, model_edit(state, host_software(con(), selected_id(), input$host$value), "runs on"))
     shiny::observeEvent(input$realize, {
       model_edit(state, realize_flow(con(), input$realize$id, input$realize$value), "realise")
     })

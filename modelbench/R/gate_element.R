@@ -58,5 +58,5 @@ element_gate_findings <- function(con) {
   bad_field_units <- DBI::dbGetQuery(con, "
     SELECT 'interface_field' AS kind, f.id, f.name || ' uses an unknown unit: ' || f.unit AS problem
       FROM interface_field f WHERE f.unit IS NOT NULL AND f.unit NOT IN (SELECT symbol FROM unit)")
-  do.call(rbind, c(problems, list(no_interface, bad_field_units)))
+  do.call(rbind, c(problems, list(no_interface, bad_field_units, hosting_findings(con))))
 }

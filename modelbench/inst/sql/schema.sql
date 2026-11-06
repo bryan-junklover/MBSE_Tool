@@ -305,6 +305,7 @@ CREATE TABLE IF NOT EXISTS link (
                    'satisfied_by',        -- requirement  -> element (allocation of a requirement)
                    'allocated_to',        -- function     -> component
                    'realized_by',         -- connector (functional) -> connector (physical)
+                   'hosted_on',           -- software element -> the hardware element it runs on
                    'derives_from',        -- requirement  -> requirement (outside the parent tree)
                    'refines',             -- requirement  -> requirement | scenario
                    'verified_by',         -- requirement  -> test_case | scenario | sm_assertion
@@ -795,6 +796,14 @@ CREATE VIEW IF NOT EXISTS v_unallocated_functions AS
     FROM element e
    WHERE e.kind = 'function'
      AND NOT EXISTS (SELECT 1 FROM link l WHERE l.link_type = 'allocated_to'
+                       AND l.source_kind = 'element' AND l.source_id = e.id);
+
+-- Software components with nothing recorded to run on.
+CREATE VIEW IF NOT EXISTS v_unhosted_software AS
+  SELECT e.id, e.name
+    FROM element e
+   WHERE e.kind = 'component' AND e.domain = 'sw'
+     AND NOT EXISTS (SELECT 1 FROM link l WHERE l.link_type = 'hosted_on'
                        AND l.source_kind = 'element' AND l.source_id = e.id);
 
 -- Blockers the database can see. Stale evidence is added by core code

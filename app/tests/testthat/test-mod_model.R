@@ -61,6 +61,36 @@ test_that("edits in the diagram and the inspector reach the same rows", {
   })
 })
 
+test_that("the inspector records where software runs, and hardware lists it", {
+  state <- local_sample_state()
+  shiny::testServer(mod_model_server, args = list(state = state), {
+    session$setInputs(view = "VW-all")
+    fire(session, type = "select", kind = "element", ids = list("C-002"))
+    html <- as.character(output$inspector$html)
+    expect_match(html, "Runs on")
+    expect_match(html, "Not recorded")
+    session$setInputs(host = list(value = "C-008", n = 1))
+    expect_identical(software_host(con(), "C-002")$host_id, "C-008")
+    expect_false(session$getReturned()$view_data()$nodes$gap[session$getReturned()$view_data()$nodes$id == "C-002"])
+    # Hardware isn't software, so the edit is refused and nothing changes.
+    fire(session, type = "select", kind = "element", ids = list("C-003"))
+    session$setInputs(host = list(value = "C-008", n = 2))
+    expect_identical(nrow(software_host(con(), "C-003")), 0L)
+    session$setInputs(undo = 1)
+    expect_identical(nrow(software_host(con(), "C-002")), 0L)
+    session$setInputs(tree_select = "C-004")
+    expect_no_match(as.character(output$inspector$html), "Runs on")
+  })
+  # Drilled into the flight controller, its hardware lists the software on it.
+  shiny::testServer(mod_model_server, args = list(state = state), {
+    session$setInputs(view = "VW-all")
+    session$setInputs(tree_select = "C-008")
+    html <- as.character(output$inspector$html)
+    expect_match(html, "Software running here")
+    expect_match(html, "Autopilot Software")
+  })
+})
+
 test_that("adding a component, a port and moving a block all work from the diagram", {
   state <- local_sample_state()
   shiny::testServer(mod_model_server, args = list(state = state), {

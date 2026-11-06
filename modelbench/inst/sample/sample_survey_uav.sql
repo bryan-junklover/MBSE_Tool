@@ -265,6 +265,9 @@ INSERT INTO link (id, link_type, source_kind, source_id, target_kind, target_id)
  ('L-0307','realized_by','connector','K-0019','connector','K-0007'),
  ('L-0308','realized_by','connector','K-0020','connector','K-0008'),
  ('L-0309','realized_by','connector','K-0021','connector','K-0010');
+-- Software and the hardware it runs on. Ground Control Software has no host yet: a gap.
+INSERT INTO link (id, link_type, source_kind, source_id, target_kind, target_id) VALUES
+ ('L-0310','hosted_on','element','C-009','element','C-008');
 
 INSERT INTO test_case (id, name, method, description) VALUES
  ('TC-007','Endurance flight test','test','Hover-cruise profile at MTOM until reserve');
@@ -388,7 +391,7 @@ INSERT INTO ai_proposal (id, task, proposal_kind, source, target_kind, target_id
 INSERT INTO id_counter (prefix, next_num) VALUES
  ('STK',4),('SYS',32),('C',11),('F',9),('EXT',3),('IF',18),('FLD',11),('P',46),('K',22),('PD',10),('STY',5),('ST',20),
  ('SC',5),('SM',2),('E',12),('T',12),('VAR',4),('LL',14),('A',2),('N',9),('G',10),
- ('TC',8),('VR',2),('BL',4),('PR',6),('L',310),('V',109),('B',3);
+ ('TC',8),('VR',2),('BL',4),('PR',6),('L',311),('V',109),('B',3);
 
 -- Changes since BL-03 (applied by tools/build_sample_project.R through the write path):
 --   1. One change set: V-0013 battery_capacity 5000 -> 4200 mAh and V-0003 Power System mass 1.47 -> 1.36 kg
