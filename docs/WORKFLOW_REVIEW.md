@@ -1,6 +1,6 @@
 # ModelBench workflow review
 
-**Date:** 2026-11-06 · **Reviewed:** `ux-review-fixes` @ efef5a0 · **Status:** the doc claims, C2 and A1–A7 are fixed; the rest is open.
+**Date:** 2026-11-06 · **Reviewed:** `ux-review-fixes` @ efef5a0 · **Status:** the doc claims, C2, A1–A7, C1 and D2 are fixed; the rest is open.
 
 **Method**
 
@@ -176,7 +176,10 @@ checked.** A stakeholder requirement can sit under a subsystem one.
 
 ## C. Checks and verification that can be fooled
 
-**C1 (P1) Evidence goes stale when nothing has changed.** *Confirmed.*
+**C1 (P1) Evidence goes stale when nothing has changed.** *Confirmed.* — **Fixed.**
+- Each entry in a record's context now carries a hash of the content that bears on the evidence. For a requirement that's its text and verification method; for others, everything except bookkeeping fields.
+- Evidence stays current through an undo, a rationale edit, re-committing the same text, and a rollback to the baseline it was recorded at.
+- Records made before this are judged by the content of the revisions they name, so existing evidence benefits too.
 - **Why:** the evidence context records each entity's revision number (db_query.R:65), and every
   write bumps it. So all of these make a passing test stale:
   - editing only a requirement's rationale or title;
@@ -258,7 +261,10 @@ can't be undone.** *Doc claim wrong.*
 - **Fix:** one global **Undo ‹what›** control; put Write and Specification edits on the stack; and
   correct the guide.
 
-**D2 (P1) Switching projects can carry the open draft into the other project.**
+**D2 (P1) Switching projects can carry the open draft into the other project.** — **Fixed.**
+- Write clears its draft and the requirement it was editing when the project changes.
+- Baselines clears its AI ratings.
+- A switch also resets the failure-mode selection, behaviour focus, return bar and any pending "open in Write".
 *From the code; not tried in a browser.*
 - **Why:** `switch_project` resets selections and Undo only. Write keeps `editing()` and the draft
   text, so committing after a switch writes that id, for example SYS-002, into the other project.

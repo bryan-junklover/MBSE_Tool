@@ -60,7 +60,27 @@ baselineable_entities <- function(con) {
   items[!(items$entity_kind == "requirement" & items$entity_id %in% excluded), , drop = FALSE]
 }
 
-# The (kind, id, rev) entries a verification record depends on (SCHEMA §7).
+# Fields that don't bear on what a test proved: bookkeeping, layout and wording around the
+# requirement. A requirement's evidence depends on its text and how it's verified.
+CONTEXT_IGNORED_FIELDS <- c("rev", "updated_at", "created_at", "sort_order", "status", "review_state", "review_note", "origin",
+                            "plain_summary", "plain_summary_origin", "description")
+CONTEXT_REQUIREMENT_FIELDS <- c("text", "verification_method")
+
+# A hash of the content a verification record depends on, for one entity row. Values are
+# compared as text, so a row read from the table and the same row from its revision JSON
+# give the same hash.
+context_content_hash <- function(kind, row) {
+  if (is.null(row)) return(NA_character_)
+  row <- as.list(row)
+  keep <- if (kind == "requirement") intersect(names(row), CONTEXT_REQUIREMENT_FIELDS) else setdiff(names(row), CONTEXT_IGNORED_FIELDS)
+  values <- lapply(row[sort(keep)], function(value) {
+    if (is.null(value) || length(value) == 0L || (length(value) == 1L && is.na(value))) NA_character_ else as.character(value)
+  })
+  sha256(canonical_json(values))
+}
+
+# The (kind, id, rev, h) entries a verification record depends on (SCHEMA §7). `h` is the
+# content hash: evidence is stale when content changes, not when a revision number moves.
 verification_context <- function(con, requirement_id) {
   requirement <- DBI::dbGetQuery(con, "SELECT 'requirement' AS kind, id, rev FROM requirement WHERE id = ?",
                                  params = list(requirement_id))
@@ -90,5 +110,9 @@ verification_context <- function(con, requirement_id) {
   context <- do.call(rbind, c(list(requirement, elements, values, requirement_analysis_inputs(con, requirement_id), machine), parts))
   context <- context[!duplicated(context[c("kind", "id")]), , drop = FALSE]
   context <- context[order(context$kind, context$id, method = "radix"), , drop = FALSE]
-  lapply(seq_len(nrow(context)), function(i) as.list(context[i, , drop = FALSE]))
+  lapply(seq_len(nrow(context)), function(i) {
+    entry <- as.list(context[i, , drop = FALSE])
+    entry$h <- context_content_hash(entry$kind, read_entity(con, entry$kind, entry$id))
+    entry
+  })
 }

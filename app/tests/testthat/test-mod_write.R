@@ -176,3 +176,16 @@ test_that("the EARS builder feeds the same text area", {
                                 input$ears_bound, input$ears_value, input$ears_unit), GOOD)
   })
 })
+
+test_that("switching project clears the open draft, so it can't be committed into the other project", {
+  state <- local_sample_state()
+  shiny::testServer(mod_write_server, args = list(state = state), {
+    session$setInputs(open = "SYS-002")
+    expect_identical(session$getReturned()$editing(), "SYS-002")
+    other <- withr::local_tempfile(fileext = ".sqlite")
+    DBI::dbDisconnect(init_project_db(other))
+    switch_project(state, other)
+    session$flushReact()
+    expect_null(session$getReturned()$editing())
+  })
+})

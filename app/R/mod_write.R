@@ -310,6 +310,12 @@ mod_write_server <- function(id, state, debounce_ms = 50, coach_ms = NULL) {
       shiny::updateTextInput(session, "title", value = "")
     }
     shiny::observeEvent(input$open, load_requirement(input$open))
+    # A draft belongs to its project: switching projects starts a clean page, so a commit
+    # can't write this text over the other project's requirement with the same id.
+    shiny::observeEvent(con(), {
+      last_commit(NULL)
+      clear_form()
+    }, ignoreInit = TRUE)
     shiny::observeEvent(input$new, {
       last_commit(NULL)
       clear_form()

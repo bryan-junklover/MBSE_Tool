@@ -10,8 +10,15 @@ entity_value_text <- function(con, kind, id, rev = NULL) {
   paste0(value, unit)
 }
 
+# A stored entry's content hash. Records made before hashes were kept have only a rev, so
+# the hash is worked out from that revision.
+stored_entry_hash <- function(con, entry) {
+  if (!is.null(entry$h)) return(entry$h)
+  context_content_hash(entry$kind, read_entity_rev(con, entry$kind, entry$id, entry$rev))
+}
+
 # The entries that differ between a record's stored context and the current one.
-context_changes <- function(stored, current) {
+context_changes <- function(stored, current, con = NULL) {
   key <- function(entries) vapply(entries, function(entry) paste(entry$kind, entry$id), "")
   stored_keys <- key(stored)
   current_keys <- key(current)
@@ -20,7 +27,7 @@ context_changes <- function(stored, current) {
     at <- match(stored_keys[i], current_keys)
     if (is.na(at)) {
       changes[[length(changes) + 1L]] <- list(kind = stored[[i]]$kind, id = stored[[i]]$id, change = "removed", was = stored[[i]]$rev, now = NA_integer_)
-    } else if (!identical(as.integer(stored[[i]]$rev), as.integer(current[[at]]$rev))) {
+    } else if (if (is.null(con)) !identical(as.integer(stored[[i]]$rev), as.integer(current[[at]]$rev)) else !identical(stored_entry_hash(con, stored[[i]]), current[[at]]$h)) {
       changes[[length(changes) + 1L]] <- list(kind = stored[[i]]$kind, id = stored[[i]]$id, change = "revised", was = stored[[i]]$rev, now = current[[at]]$rev)
     }
   }
@@ -55,7 +62,8 @@ stale_evidence <- function(con) {
     current <- verification_context(con, record$requirement_id)
     if (identical(sha256(canonical_json(current)), record$context_hash)) return(NULL)
     stored <- jsonlite::fromJSON(record$context_json, simplifyVector = FALSE)
-    changes <- context_changes(stored, current)
+    changes <- context_changes(stored, current, con)
+    if (length(changes) == 0L) return(NULL)
     data.frame(id = record$id, requirement_id = record$requirement_id, test_case_id = record$test_case_id,
                text = paste(vapply(changes, function(change) describe_change(con, change), ""), collapse = "; "), stringsAsFactors = FALSE)
   })

@@ -113,6 +113,11 @@ mod_baselines_server <- function(id, state) {
     selected <- shiny::reactiveVal(NULL)
     audience <- shiny::reactiveVal("technical")
     ai_results <- shiny::reactiveVal(list())
+    # AI ratings are keyed by change set, and change-set ids repeat across projects.
+    shiny::observeEvent(con(), {
+      ai_results(list())
+      selected(NULL)
+    }, ignoreInit = TRUE)
     ai_error <- shiny::reactiveVal(NULL)
 
     baselines <- shiny::reactive({
