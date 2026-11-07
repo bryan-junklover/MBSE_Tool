@@ -185,8 +185,10 @@ app_server <- function(input, output, session) {
     # Checks the local server every so often, with a short timeout.
     shiny::invalidateLater(30000)
     render_status_strip(status_counts(state$con()), "nav_click", coach_status(state$con()), ai_usage_today(state$con()),
-                        get_setting(state$con(), "coaching_policy", "tiered"))
+                        get_setting(state$con(), "coaching_policy", "tiered"), state$commands())
   })
+  shiny::observeEvent(input$global_undo, run_command(state, undo_command))
+  shiny::observeEvent(input$global_redo, run_command(state, redo_command))
   output$top_nav <- shiny::renderUI(render_top_nav(state$nav()$workspace, "nav_click"))
   # The tab last used in each workspace, kept when moving between them.
   tabs <- shiny::reactiveVal(list(Write = "Draft", Model = "Structure", Behavior = "Scenarios", Analyze = "Health", Help = "User guide"))

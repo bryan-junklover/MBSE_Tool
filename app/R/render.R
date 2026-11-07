@@ -132,7 +132,8 @@ render_outline <- function(outline, select_input, selected = NULL) {
   }))
 }
 
-render_status_strip <- function(counts, nav_input, coach = NULL, usage = NULL, policy = "tiered") {
+render_status_strip <- function(counts, nav_input, coach = NULL, usage = NULL, policy = "tiered", stack = NULL) {
+  last <- function(commands) if (length(commands) == 0L) NULL else commands[[length(commands)]]$label
   shiny::tags$div(
     role = "status", `aria-label` = "Session status", class = "mb-status",
     if (!is.null(coach)) {
@@ -142,7 +143,18 @@ render_status_strip <- function(counts, nav_input, coach = NULL, usage = NULL, p
     shiny::tags$span(sprintf("Policy: %s", policy)),
     shiny::tags$button(type = "button", onclick = event_js(nav_input, list(workspace = "Analyze", tab = "Health")),
                        sprintf("%d unreviewed AI drafts · %d placeholders", counts$unreviewed, counts$placeholders)),
-    if (!is.null(usage)) shiny::tags$span(style = "margin-left:auto", sprintf("Today: %d calls · $%.2f", usage$calls, usage$cost))
+    if (!is.null(usage)) shiny::tags$span(style = "margin-left:auto", sprintf("Today: %d calls · $%.2f", usage$calls, usage$cost)),
+    # One Undo for the whole session, saying what it would undo (review D1).
+    if (!is.null(stack)) {
+      shiny::tagList(
+        shiny::tags$button(type = "button", disabled = if (length(stack$undo) == 0L) NA, onclick = event_js("global_undo", "undo"),
+                           `aria-label` = if (length(stack$undo) > 0L) paste("Undo", last(stack$undo)) else "Nothing to undo",
+                           if (length(stack$undo) > 0L) sprintf("Undo %s", last(stack$undo)) else "Undo"),
+        shiny::tags$button(type = "button", disabled = if (length(stack$redo) == 0L) NA, onclick = event_js("global_redo", "redo"),
+                           `aria-label` = if (length(stack$redo) > 0L) paste("Redo", last(stack$redo)) else "Nothing to redo",
+                           if (length(stack$redo) > 0L) sprintf("Redo %s", last(stack$redo)) else "Redo")
+      )
+    }
   )
 }
 

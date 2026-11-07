@@ -348,6 +348,7 @@ mod_write_server <- function(id, state, debounce_ms = 50, coach_ms = NULL) {
                                                  coach_state = if (reviewed) "reviewed" else "uncoached",
                                                  assessed_text = if (reviewed) held$text, coach_call_id = if (reviewed) held$call_id))
       if (is.null(written)) return()
+      push_edit(state, written, sprintf("commit %s", written$id))
       if (reviewed) record_conflicts(con(), written$id, held$answer, held$call_id)
       last_commit(written$id)
       invalidate_db(state, written$area)
@@ -361,6 +362,7 @@ mod_write_server <- function(id, state, debounce_ms = 50, coach_ms = NULL) {
     shiny::observeEvent(input$save_request, {
       written <- guarded_edit(save_draft(con(), input$save_request$text, editing(), form_fields()))
       if (is.null(written)) return()
+      push_edit(state, written, sprintf("save draft %s", written$id))
       editing(written$id)
       invalidate_db(state, written$area)
     })
@@ -422,7 +424,10 @@ mod_write_server <- function(id, state, debounce_ms = 50, coach_ms = NULL) {
         component = add_term_as_component(con(), action$term, parent)
       ))
       pending_term(NULL)
-      if (!is.null(written)) invalidate_db(state, "model")
+      if (!is.null(written)) {
+        push_edit(state, written, sprintf("add %s", action$term))
+        invalidate_db(state, "model")
+      }
     })
 
     invisible(list(gate = gate, commit_info = commit_info, editing = editing, review = current_review, failure = current_failure))

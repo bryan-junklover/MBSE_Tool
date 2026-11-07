@@ -1,6 +1,6 @@
 # ModelBench workflow review
 
-**Date:** 2026-11-06 · **Reviewed:** `ux-review-fixes` @ efef5a0 · **Status:** fixed so far: the doc claims; A1–A7; B1–B4 and B7–B9; C1–C5, C7 and C8; D2; G4 and G7. Partly fixed: B5. The rest is open.
+**Date:** 2026-11-06 · **Reviewed:** `ux-review-fixes` @ efef5a0 · **Status:** fixed so far: the doc claims; A1–A7; B1–B4 and B6–B9; C1–C8; D1 and D2; E1–E3; F3 and F6; G1, G2, G4, G5 and G7. Partly fixed: B5. Open: B10–B15; C9–C11; D3–D7; F1, F2, F4, F5 and F7; G3, G6, G8 and G9.
 
 **Method**
 
@@ -133,7 +133,7 @@ scenario can never be deleted.
   requirement even after that link is removed.
 - **Fix:** add edit and delete, and take the requirement from the link.
 
-**B6 (P2) Test cases can't be renamed, unlinked or deleted.**
+**B6 (P2) Test cases can't be renamed, unlinked or deleted.** — **Fixed**, apart from delete: a test case with results is evidence. Name and method are editable, and **Unlink** removes it from the requirement.
 - **Fix:** add these to the Verification panel. A delete either keeps or clears its records.
 
 **B7 (P2) A port can't be edited after it's created.** — **Fixed.**
@@ -235,7 +235,7 @@ but only the documents show it.
 - **Fix:** ignore deprecated handlers. Count a requirement as verified only when its latest result
   passes, or at least exists.
 
-**C6 (P2) A stale-evidence blocker can't be cleared once its test case is unlinked.** The blocker
+**C6 (P2) A stale-evidence blocker can't be cleared once its test case is unlinked.** — **Fixed.** Only results for test cases still linked count. Unlinking retires the others, which stay as history. The blocker
 counts records with no link filter, and Specification lists only linked test cases.
 - **Fix:** count only test cases still linked, or offer **Retire evidence**.
 
@@ -271,7 +271,10 @@ that detects a failure but that no state handles, or a handling transition on a 
 ## D. Undo, projects and AI drafts
 
 **D1 (P1) Undo is one stack for the whole session, its button doesn't say what it undoes, and much
-can't be undone.** *Doc claim wrong.*
+can't be undone.** *Doc claim wrong.* — **Fixed.**
+- **Undo ‹what›** and **Redo ‹what›** at the right of the status strip work from any screen and name the edit, for example "Undo name of Payload Camera".
+- Commits, saved drafts, terms added from a draft, Specification edits, deprecations and test cases are now on the stack.
+- Still not undoable: recorded results, imports, dismissals and settings. The guide says so.
 - **Where it lives:** the Undo button is only on Model and the Behavior diagrams. So Undo on
   Structure can silently revert a Trace link or a budget added in Project.
 - **Not undoable:**
@@ -322,7 +325,11 @@ viewpoints, layout and saved views aren't captured, so a rollback doesn't restor
 
 ## E. References by name
 
-**E1 (P2) Renaming an interface field breaks what names it.**
+**E1 (P2) Renaming an interface field breaks what names it.** — **Fixed.**
+- A field rename updates the failure modes, steps and events that name it, in the same change set.
+- Deleting a field clears those names.
+- The field name is checked only when it changes.
+- Undo reverses all of it.
 - Failure modes, sequence steps and events store the field's name, not its id.
 - After a rename, any edit to that failure mode is refused ("IF-002 has no field gnss_valid") until
   its Field is changed.
@@ -330,11 +337,11 @@ viewpoints, layout and saved views aren't captured, so a rollback doesn't restor
 - **Fix:** carry a rename into those rows in the same change set, and validate `field_name` only
   when it's the field being changed.
 
-**E2 (P2) `prop(Element.property)` in guards breaks when the component is renamed.** The simulator
+**E2 (P2) `prop(Element.property)` in guards breaks when the component is renamed.** — **Fixed.** Renaming a component rewrites guards, effects and entry effects that name it. The simulator
 then errors. The transition can't be saved until its guard is rewritten, and nothing flags it.
 - **Fix:** rewrite expressions on rename, or list broken ones in Health and Completeness.
 
-**E3 (P3) Connector labels copy the interface name, and keep the old one after a rename.**
+**E3 (P3) Connector labels copy the interface name, and keep the old one after a rename.** — **Fixed.** Labels that still show the old name follow the rename.
 
 ## F. Requirements entry and import
 
@@ -347,7 +354,7 @@ drafts. Because of B1, they can't be removed. There's no ReqIF import.
 - **Fix:** add such a row as a draft.
 
 **F3 (P2) A term added as an interface field never resolves, and adding it again gives a raw
-UNIQUE error.** `model_terms` doesn't read interface fields.
+UNIQUE error.** — **Fixed.** Field names resolve to the element that sends them, and the duplicate reads in plain words (G5). `model_terms` doesn't read interface fields.
 
 **F4 (P2) An unsaved draft is silently replaced.** Choosing another outline item, **Rewrite it in
 Write**, **+ Requirement** or a scope-gap draft all overwrite the text without asking.
@@ -358,20 +365,20 @@ Specification. The only way to coach one is to rewrite and re-commit it, which m
 stale (C1). Committing without a coach downgrades an already-coached requirement.
 - **Fix:** show coach state, and add **Ask the coach** that doesn't bump the revision.
 
-**F6 (P3) Save draft accepts empty text.**
+**F6 (P3) Save draft accepts empty text.** — **Fixed.**
 
 **F7 (P3) A term added as a property of a second element stops resolving everywhere.**
 
 ## G. Smaller dead ends and raw errors (P3)
 
-- **G1:** outside equipment placed on Flows before there's a system block is drawn twice
+- **G1** *(fixed)***:** outside equipment placed on Flows before there's a system block is drawn twice
   (`structure_view` adds top-level externals twice when the root is empty). *Confirmed.*
-- **G2:** double-clicking outside equipment opens an empty "level" inside it, with no way back.
+- **G2** *(fixed)***:** double-clicking outside equipment opens an empty "level" inside it, with no way back.
 - **G3:** changing a step's **Kind** to or from a fragment gives raw CHECK errors. Deleting a
   fragment's opener leaves its closer behind.
 - **G4:** with every component already a lifeline, **+ Lifeline** offers an empty list, and
   confirming gives a raw NOT NULL error.
-- **G5:** duplicate port, interface or field names give raw UNIQUE errors.
+- **G5** *(fixed)***:** duplicate port, interface or field names gave raw UNIQUE errors. Those, and other NOT NULL and CHECK refusals, now read in plain words.
 - **G6:** AI-sketched steps can only be reviewed one at a time; reviewing the scenario doesn't
   review its steps.
 - **G7** *(fixed)***:** with nothing selected, the inspector labels every budget "This level", whatever the

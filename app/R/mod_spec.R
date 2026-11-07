@@ -76,10 +76,16 @@ render_evidence <- function(cases, ns, checks = NULL) {
     }),
     lapply(seq_len(nrow(cases)), function(i) {
       case <- cases[i, ]
+      change <- function(field) change_js(ns("case_change"), list(id = case$id, field = field))
       shiny::tags$div(
         style = "display:flex;flex-direction:column;gap:4px",
-        shiny::tags$div(class = "mb-head", shiny::tags$span(class = "mono", case$id), shiny::tags$span(case$name),
-                        shiny::tags$button(type = "button", class = "mb-btn mb-btn-small mb-push", onclick = event_js(ns("record"), case$id), "Record a result…")),
+        shiny::tags$div(class = "mb-event-row", shiny::tags$span(class = "mono", case$id),
+                        shiny::tags$input(type = "text", value = case$name, onchange = change("name"), `aria-label` = paste("Name of", case$id)),
+                        select_tag(VERIFY_METHODS, case$method, change("method"), label = paste("Method of", case$id)),
+                        shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", onclick = event_js(ns("record"), case$id), "Record a result…"),
+                        confirm_button("Unlink", ns("case_unlink"), case$id, sprintf("Unlink %s?", case$id),
+                                       "It no longer verifies this requirement. Its recorded results stay as history but stop counting, so stale ones stop blocking a baseline. Undo links it again.",
+                                       confirm = "Unlink", class = "mb-btn mb-btn-small")),
         shiny::tags$span(class = "mb-caption", if (is.na(case$result)) "No result recorded." else sprintf("%s · %s", toupper(case$result), case$recorded_at)),
         if (!is.na(case$stale)) shiny::tags$span(class = "mb-gap", style = "font-size:12px", sprintf("Stale evidence: %s", case$stale))
       )
@@ -215,9 +221,12 @@ mod_spec_server <- function(id, state) {
     shiny::observeEvent(input$case_confirm, {
       written <- guarded_edit(add_test_case(con(), selected(), input$case_name, input$case_method))
       if (is.null(written)) return()
+      push_edit(state, written, "add test case")
       shiny::removeModal()
       invalidate_db(state, c("spec", "model"))
     })
+    shiny::observeEvent(input$case_change, model_edit(state, update_test_case(con(), input$case_change$id, input$case_change$field, input$case_change$value), "edit test case"))
+    shiny::observeEvent(input$case_unlink, model_edit(state, unlink_test_case(con(), selected(), input$case_unlink), "unlink test case"))
     pending_case <- shiny::reactiveVal(NULL)
     shiny::observeEvent(input$record, {
       pending_case(input$record)
@@ -243,7 +252,10 @@ mod_spec_server <- function(id, state) {
       row <- shiny::isolate(current())
       if (is.null(row)) return(invisible(NULL))
       written <- guarded_edit(save_requirement_details(con(), row$id, stats::setNames(list(value), field)))
-      if (!is.null(written)) invalidate_db(state, written$area)
+      if (!is.null(written)) {
+        push_edit(state, written, sprintf("edit %s", row$id))
+        invalidate_db(state, written$area)
+      }
       invisible(NULL)
     }
     title_debounced <- shiny::debounce(shiny::reactive(input$d_title), 400)

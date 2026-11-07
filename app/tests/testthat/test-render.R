@@ -168,3 +168,16 @@ test_that("a budget line says when it fails or leaves out values", {
   expect_identical(budget_status_text("9 / 5 W", FALSE, NA_character_), "9 / 5 W · FAIL")
   expect_identical(budget_status_text("no values yet / 5 A", TRUE, "no values yet"), "no values yet / 5 A")
 })
+
+test_that("the status strip's Undo says what it would undo", {
+  stack <- push_command(new_command_stack(), change_command("CS-0001", "commit SYS-040"))
+  html <- html_of(render_status_strip(list(unreviewed = 0L, placeholders = 0L), "nav", stack = stack))
+  expect_match(html, "Undo commit SYS-040", fixed = TRUE)
+  expect_match(html, "Nothing to redo", fixed = TRUE)
+})
+
+test_that("database refusals read in plain words", {
+  expect_identical(plain_db_message("UNIQUE constraint failed: port.element_id, port.name"), "There's already a port with that name here. Choose another.")
+  expect_match(plain_db_message("NOT NULL constraint failed: seq_lifeline.element_id"), "missing")
+  expect_identical(plain_db_message("Something else"), "Something else")
+})

@@ -456,8 +456,8 @@ mod_model_server <- function(id, state, mode = "structure") {
         event$type,
         select = selection(list(kind = event$kind, ids = as.character(unlist(event$ids)))),
         open = {
-          # Functions have no levels to open.
-          if (mode != "functional") {
+          # Functions and outside equipment have no levels to open.
+          if (mode != "functional" && !identical(DBI::dbGetQuery(con(), "SELECT kind FROM element WHERE id = ?", params = list(event$id))$kind, "external")) {
             root(event$id)
             selection(list(kind = "none", ids = character(0)))
           }
@@ -593,7 +593,8 @@ mod_model_server <- function(id, state, mode = "structure") {
       } else if (!nzchar(value)) {
         value <- NA_character_
       }
-      model_edit(state, write_element(con(), selected_id(), stats::setNames(list(value), change$field)), "edit")
+      model_edit(state, write_element(con(), selected_id(), stats::setNames(list(value), change$field)),
+                 sprintf("%s of %s", gsub("_", " ", change$field), read_entity(con(), "element", selected_id())$name))
     })
     shiny::observeEvent(input$property_change, {
       model_edit(state, set_property_value(con(), input$property_change$id, input$property_change$value), "set value")

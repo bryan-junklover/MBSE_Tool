@@ -229,7 +229,8 @@ structure_view <- function(con, view_id = "VW-all", root = default_structure_roo
       FROM element e LEFT JOIN stereotype s ON s.id = e.stereotype_id")
   children <- all[if (is.na(root)) is.na(all$parent_id) else all$parent_id %in% root, , drop = FALSE]
   children <- children[children$kind != "function", , drop = FALSE]
-  if (include_external) children <- rbind(children, all[all$kind == "external" & is.na(all$parent_id), , drop = FALSE])
+  # At the top level, outside equipment is already among the children: add it once (review G1).
+  if (include_external) children <- rbind(children[children$kind != "external", , drop = FALSE], all[all$kind == "external" & is.na(all$parent_id), , drop = FALSE])
   nodes <- children[filter_elements(con, children, filter_json), , drop = FALSE]
 
   ports <- DBI::dbGetQuery(con, "

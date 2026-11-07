@@ -48,12 +48,19 @@ model_terms <- function(con) {
       FROM property_value v JOIN property_def d ON d.id = v.property_def_id
       JOIN element e ON v.owner_kind = 'element' AND e.id = v.owner_id
       LEFT JOIN stereotype s ON s.id = e.stereotype_id")
+  # An interface field ("heading accuracy") resolves to the element that sends it.
+  fields <- DBI::dbGetQuery(con, "
+    SELECT replace(f.name, '_', ' ') AS term, e.id AS element_id, e.name AS element_name, s.name AS stereotype, 'field' AS source
+      FROM interface_field f JOIN port p ON p.interface_id = f.interface_id AND p.direction IN ('out', 'inout')
+      JOIN element e ON e.id = p.element_id LEFT JOIN stereotype s ON s.id = e.stereotype_id
+     ORDER BY f.name, e.sort_order")
+  fields <- fields[!duplicated(fields$term), , drop = FALSE]
   not_model <- DBI::dbGetQuery(con, "
     SELECT term, NULL AS element_id, NULL AS element_name, NULL AS stereotype, 'not_model' AS source
       FROM glossary WHERE element_id IS NULL")
   # A property several elements hold (mass, power) doesn't say which element is meant.
   properties <- properties[!properties$term %in% properties$term[duplicated(properties$term)], , drop = FALSE]
-  terms <- rbind(elements, aliases, properties, not_model)
+  terms <- rbind(elements, aliases, properties, fields, not_model)
   terms$norm <- normalize_term(terms$term)
   # An element name beats an alias, which beats a property.
   terms[!duplicated(terms$norm), , drop = FALSE]

@@ -64,14 +64,15 @@ In a narrow window, columns open over the page from their rails instead, and Esc
   put.
 - Connector labels hide when the diagram is too small to read them.
 
-**Undo.** The **Undo** and **Redo** buttons are on the Model and Behavior diagram screens. They
-undo model edits made anywhere in the session, most recent first: structure, interfaces, links,
-behaviour, failure modes, and the properties and budgets in Project. The stack starts afresh when
-you switch project or roll back.
+**Undo.** **Undo ‹what›** and **Redo ‹what›** at the right of the status strip say exactly what
+they would undo or redo. Undo covers the whole session, most recent first, wherever the edit was
+made: requirements (commit, save, inspector edits, deprecate), structure, interfaces, links,
+behaviour, failure modes, test cases, and the properties and budgets in Project. The diagram
+screens' own Undo buttons use the same list. It starts afresh when you switch project or roll
+back.
 
-Some changes can't be undone yet:
-- committing or saving a requirement, and edits in the Specification inspector;
-- test cases and recorded results;
+Some changes can't be undone:
+- recorded test results, which are evidence;
 - imports;
 - dismissing an AI item;
 - the glossary, units, ID prefixes and scope.
@@ -99,7 +100,9 @@ thing they're about. A bar then offers **Back to …** the screen you came from.
   part.
 - **Budgets** limit a rolled-up property over part of the system, at most or at least, and can
   name the requirement they come from. They're checked on every edit; Health and the Structure
-  inspector show any that fail.
+  inspector show any that fail, and any marked *incomplete* because values are still to be set.
+- A property's label, roll-up and unit can be edited (the unit within the same quantity), and
+  an unused property can be deleted.
 - **Units:** every project has the standard units. Add your own with its symbol, what it
   measures, its SI unit, and its factor (plus an offset, as for °C). A quantity already listed
   keeps its SI unit, so values convert between units.
@@ -153,9 +156,20 @@ The outline and table of every requirement, sortable by gate score (**Lowest sco
 
 - Select a requirement to edit its details in the inspector.
 - **Rewrite it in Write** reopens committed text in Draft, and the gate checks it again.
-- **Verification:** add a test case (name and method), then **Record result** with pass, fail or
-  error, an evidence reference and a note. Evidence recorded against an older version of the
-  model is marked stale.
+- **Deprecate…** retires a committed requirement, with your reason. It leaves the
+  specification, the counts and Health, but its history and baselines keep it. A failure it
+  handled no longer counts as handled. **Delete draft…** removes a draft.
+- **Verification:**
+  - Add a test case (name and method), then **Record result** with pass, fail or inconclusive,
+    an evidence reference and a note.
+  - A test case's name and method can be edited. **Unlink** stops it verifying the
+    requirement: its results stay as history but no longer count.
+  - Evidence goes stale when something it was recorded against changes, such as a value, the
+    requirement's text or its verification method. Edits that change nothing it depends on
+    leave it current.
+  - Assertions that verify the requirement are listed too, with how they run now and their
+    last recorded result.
+  - A requirement counts as verified when at least one result passes and none fails.
 - **Import** from CSV, Excel or text. Each row is gate-checked, and you either add it as a draft
   or skip it.
 - **Export** as ReqIF, CSV, Markdown or PDF.
@@ -190,7 +204,11 @@ the inspector on the right.
   - name, stereotype, domain (hardware, software, hardware and software, other), status, how
     many, and description;
   - properties, with units. **Add a property** offers the project's property definitions.
-  - ports, and the requirements linked to it.
+  - **Part of**: move it under another component. **Ungroup…** moves its parts up a level and
+    removes it.
+  - ports, each with its name, direction and interface editable; a change that would break one
+    of its connectors is refused, naming it. Each property has **Remove**.
+  - the requirements linked to it.
   - **Runs on** (software components only): the hardware it runs on. Hardware lists **Software
     running here**.
   - **Keep this position on auto-layout**, and delete.
@@ -200,6 +218,9 @@ the inspector on the right.
   recorded to run on.
 - **Connector checks:** a connector must join ports with the same interface and compatible
   directions. A refused connection says why.
+- **Deleting** says what goes with the component (its parts, ports, connectors, scenario
+  lifelines, budgets) and what stays but is unlinked (requirements that named it as their
+  actor). Undo brings it all back.
 
 ### Flows
 
@@ -226,6 +247,9 @@ The interface dictionary.
 
 - Each interface has a flow type, a rate, a transport, and fields.
 - Each field has a type, a unit, and a range, which can be "to be decided" or "not applicable".
+- Renaming a field or interface carries through to what names it: failure modes, scenario
+  steps, events and connector labels. Renaming a component rewrites the guards and effects that
+  name it with `prop()`.
 - **Where it's used** lists the ports, scenarios, state machine events and requirements that
   refer to the interface.
 - **ICD (HTML)** and **ICD (PDF)** export the interface control document.
@@ -253,6 +277,9 @@ Sequence or activity diagrams, edited as a table of steps.
   drafts.
 - **Highlighting:** amber means a step names a field its interface doesn't have. Dashed blue is
   an AI draft that needs your review.
+- **Edit scenario** has its name, description, its lifelines (each with **Remove**, which takes
+  its messages) and **Delete scenario…**. An AI sketch that's wrong can be thrown away with
+  **Discard sketch…**.
 
 ### State machines
 
@@ -261,13 +288,24 @@ chooses which one to edit. States, events and variables each have an **Add…** 
 drag between a state's handles to add a transition. The inspector edits the selected state or
 transition.
 
+Under the list of states you can:
+- rename the machine, or delete it;
+- rename an event, tie it to the interface field that raises it, or remove it;
+- set a variable's initial value and unit, or remove it;
+- see the events **Ignored on purpose**, each with **Check again**.
+
+A change that would break an assertion or an expression is refused, naming what uses the
+event or variable.
+
 - **Guards and effects** use a small language: `gnss_valid == false`, `soc := soc - 5`,
   `prop(Power System.battery_capacity) > 4000`. A transition can wait for its condition to hold
   for a time.
 - **Completeness** lists each event/state pair that needs a transition, or an **Ignore, with my
-  note**. It counts only the pairs you've put in scope: select a state, and tick the events it
-  **Must handle**. A new event isn't in scope anywhere until you tick it.
-- **Checks** holds assertions. **Add assertion…** builds one from a start state, a list of events
+  note**. It counts the pairs in scope: a state's **Must handle** ticks. A new event is ticked
+  in every state that isn't final, and a new state ticks every event, so they're checked from
+  the start; untick where an event doesn't apply. Events no state must handle are named at the
+  top.
+- **Checks** holds assertions, each with **Delete**. **Add assertion…** builds one from a start state, a list of events
   and the state it should end in, optionally tied to a requirement. **Run and record** runs them
   all, and a requirement's checks run live.
 - **The simulator** runs under the canvas. Choose where to start, fire events (those that can fire
@@ -351,6 +389,9 @@ The AI's questions and sketches, plus structural gaps the code finds.
   so a rollback can itself be undone. Requirements committed since the baseline are removed,
   even ones that were drafts then; the safety baseline keeps them.
 - **Create baseline** is enabled once nothing blocks it. Its button names the blockers until then.
+  The dialog also lists what doesn't block but is worth knowing (failing or incomplete budgets,
+  failing assertions, unhandled pairs, open failure responses, unallocated requirements), and
+  writes that list into the baseline's note.
 
 ### Documents
 

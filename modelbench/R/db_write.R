@@ -81,7 +81,9 @@ validate_entity <- function(con, kind, id, row, existing = NULL) {
     if (!row$subject_kind %in% FAILURE_SUBJECT_KINDS || !polymorphic_exists(con, row$subject_kind, row$subject_id)) {
       refuse("Can't save ", id, ": what fails (", row$subject_kind, " ", row$subject_id, ") isn't in the model.")
     }
-    if (!is.null(row$field_name) && !is.na(row$field_name) && nzchar(row$field_name) &&
+    # Checked only when it changes, so an old name never blocks an unrelated edit.
+    field_changed <- is.null(existing) || !identical(existing$field_name, row$field_name) || !identical(existing$subject_id, row$subject_id)
+    if (field_changed && !is.null(row$field_name) && !is.na(row$field_name) && nzchar(row$field_name) &&
         nrow(DBI::dbGetQuery(con, "SELECT 1 FROM interface_field WHERE interface_id = ? AND name = ?", params = list(row$subject_id, row$field_name))) == 0L) {
       refuse("Can't save ", id, ": ", row$subject_id, " has no field ", row$field_name, ".")
     }
@@ -166,6 +168,11 @@ write_entity <- function(con, kind, id = NULL, fields = list(), author = "engine
     }
 
     row <- read_entity(con, kind, id)
+    # A rename carries to what names it first, so its own revision comes last and Undo,
+    # which replays backwards, renames it back before restoring the rest.
+    if (!is.null(existing) && kind %in% c("interface_field", "element", "interface") && !is.null(fields$name) && !identical(existing$name, row$name)) {
+      carry_rename(con, kind, row, existing$name, author, change_set)
+    }
     write_revision(con, kind, id, row, author, note, change_set,
                    if (is.null(existing)) "create" else "update")
     list(kind = kind, id = id, rev = row$rev, change_set = change_set, area = unname(ENTITY_AREAS[kind]))
@@ -253,7 +260,8 @@ reference_clears <- function(con, going) {
       }
     }
   }
-  updates
+  fields_going <- vapply(Filter(function(e) e$kind == "interface_field", going), function(e) e$id, "")
+  c(updates, Filter(function(u) !paste(u$kind, u$id) %in% doomed, field_name_clears(con, fields_going)))
 }
 
 # What would stop a delete, in plain words, or NULL. Recorded evidence and assertions

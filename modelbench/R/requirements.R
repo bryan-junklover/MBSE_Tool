@@ -74,6 +74,7 @@ commit_requirement <- function(con, text, id = NULL, fields = list(), author = "
 
 # Drafts may fail the gate and hold placeholders. A committed requirement can't go back to draft.
 save_draft <- function(con, text, id = NULL, fields = list(), author = "engineer", note = NULL) {
+  if (is.null(text) || !nzchar(trimws(text))) refuse("Write something before saving a draft.")
   if (!is.null(id)) {
     existing <- read_entity(con, "requirement", id)
     if (!is.null(existing) && identical(existing$status, "committed")) {

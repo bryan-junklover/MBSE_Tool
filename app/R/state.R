@@ -42,9 +42,22 @@ refusal_toast <- function(message) {
 # Runs a model edit. A refusal becomes a toast and returns NULL, never a crash.
 guarded_edit <- function(code) {
   tryCatch(code, error = function(e) {
-    refusal_toast(conditionMessage(e))
+    refusal_toast(plain_db_message(conditionMessage(e)))
     NULL
   })
+}
+
+# The database's own refusals, in words (review G5). Anything else is shown as it is.
+plain_db_message <- function(message) {
+  if (grepl("UNIQUE constraint failed", message, fixed = TRUE)) {
+    what <- sub("^.*UNIQUE constraint failed: ([a-z_]+)\\..*$", "\\1", message)
+    return(sprintf("There's already %s with that name here. Choose another.", switch(what, port = "a port", interface = "an interface", interface_field = "a field",
+                                                                                     sm_state = "a state", sm_event = "an event", sm_variable = "a variable",
+                                                                                     element = "a component", "one")))
+  }
+  if (grepl("NOT NULL constraint failed", message, fixed = TRUE)) return("Something this needs is missing, so nothing was saved.")
+  if (grepl("CHECK constraint failed", message, fixed = TRUE)) return("That combination isn't allowed here, so nothing was saved.")
+  message
 }
 
 # Sends a click to the server as an event, so the same value can be clicked twice.
@@ -52,6 +65,14 @@ event_js <- function(input_id, value) {
   sprintf("Shiny.setInputValue(%s, %s, {priority: 'event'})",
           jsonlite::toJSON(input_id, auto_unbox = TRUE),
           jsonlite::toJSON(value, auto_unbox = TRUE))
+}
+
+# Puts an edit made through guarded_edit on the Undo stack, when it made a change set.
+push_edit <- function(state, written, label) {
+  if (is.list(written) && !is.null(written$change_set)) {
+    state$commands(push_command(shiny::isolate(state$commands()), change_command(written$change_set, label)))
+  }
+  invisible(written)
 }
 
 # Runs a model edit that returns a change set: a refusal is a toast, a success can be undone.

@@ -51,10 +51,14 @@ describe_change <- function(con, change) {
 # One row per record whose context no longer matches, with what changed. Only the
 # latest record for a test case counts: re-recording is how evidence becomes current.
 stale_evidence <- function(con) {
+  # Only test cases still linked to their requirement count: unlinking one retires its
+  # records, which stay as history.
   records <- DBI::dbGetQuery(con, "
     SELECT v.* FROM verification_record v
      WHERE v.rowid = (SELECT max(o.rowid) FROM verification_record o
                        WHERE o.requirement_id = v.requirement_id AND coalesce(o.test_case_id, '') = coalesce(v.test_case_id, ''))
+       AND (v.test_case_id IS NULL OR EXISTS (SELECT 1 FROM link l WHERE l.link_type = 'verified_by' AND l.source_kind = 'requirement'
+                                               AND l.source_id = v.requirement_id AND l.target_kind = 'test_case' AND l.target_id = v.test_case_id))
      ORDER BY v.id")
   empty <- data.frame(id = character(0), requirement_id = character(0), test_case_id = character(0), text = character(0), stringsAsFactors = FALSE)
   rows <- lapply(seq_len(nrow(records)), function(i) {
@@ -91,6 +95,24 @@ requirement_evidence <- function(con, requirement_id) {
     }
   }
   cases
+}
+
+# A test case's name or method.
+update_test_case <- function(con, test_case_id, field, value, author = "engineer") {
+  if (is.null(read_entity(con, "test_case", test_case_id))) refuse("That test case no longer exists.")
+  value <- trimws(if (is.null(value)) "" else value)
+  if (field == "name" && !nzchar(value)) refuse("A test case needs a name.")
+  if (!field %in% c("name", "method")) refuse("A test case's ", field, " can't be changed here.")
+  write_test_case(con, test_case_id, stats::setNames(list(value), field), author, "Test case edited")
+}
+
+# Stops a test case verifying a requirement. Its recorded results stay as history but no
+# longer count, so stale ones stop blocking a baseline.
+unlink_test_case <- function(con, requirement_id, test_case_id, author = "engineer") {
+  link <- DBI::dbGetQuery(con, "SELECT id FROM link WHERE link_type = 'verified_by' AND source_kind = 'requirement' AND source_id = ?
+                                   AND target_kind = 'test_case' AND target_id = ?", params = list(requirement_id, test_case_id))$id
+  if (length(link) == 0L) refuse(test_case_id, " doesn't verify ", requirement_id, ".")
+  delete_entity(con, "link", link[1], author, "Test case unlinked")
 }
 
 add_test_case <- function(con, requirement_id, name, method, author = "engineer") {
