@@ -54,7 +54,17 @@ sim_fire <- function(machine, sim, event_name, set = list()) {
   if (nrow(event) == 0L) return(sim_fail(sim, machine, event_name, sprintf("\"%s\" isn't an event of this state machine.", event_name)))
   for (name in names(set)) {
     if (!name %in% machine$variables$name) return(sim_fail(sim, machine, event_name, sprintf("\"%s\" isn't a variable.", name)))
-    sim$variables[[name]] <- set[[name]]
+    # A set value takes its variable's type, so 1 from JSON is the number 1 and "true" a bool (review C10).
+    type <- machine$variables$value_type[machine$variables$name == name]
+    value <- set[[name]]
+    converted <- switch(type,
+                        number = suppressWarnings(as.numeric(value)),
+                        bool = if (is.logical(value)) value else if (tolower(as.character(value)) %in% c("true", "false")) tolower(as.character(value)) == "true" else NA,
+                        as.character(value))
+    if (length(converted) != 1L || is.na(converted)) {
+      return(sim_fail(sim, machine, event_name, sprintf("%s is a %s, so it can't be set to %s.", name, type, paste(format(value), collapse = ", "))))
+    }
+    sim$variables[[name]] <- converted
   }
   tryCatch({
     from <- machine$transitions[machine$transitions$from_state_id == sim$current & machine$transitions$event_id == event$id, , drop = FALSE]

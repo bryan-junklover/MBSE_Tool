@@ -391,7 +391,10 @@ test_that("starting from a sketch hands over the draft, and a link needs its not
   con <- local_sample()
   id <- insert_proposal(con, list(task = "scope_gaps", proposal_kind = "sketch_requirement", title = "T?", payload_json = canonical_json(list(draft = "The UAV shall fly."))))
   expect_identical(start_from_sketch(con, id), "The UAV shall fly.")
-  expect_identical(DBI::dbGetQuery(con, "SELECT status FROM ai_proposal WHERE id = ?", params = list(id))$status, "kept")
+  # It stays open until the draft is saved, so leaving Write doesn't lose it.
+  expect_identical(DBI::dbGetQuery(con, "SELECT status FROM ai_proposal WHERE id = ?", params = list(id))$status, "open")
+  keep_started_sketch(con, id, "SYS-003")
+  expect_identical(DBI::dbGetQuery(con, "SELECT status, created_entity_id FROM ai_proposal WHERE id = ?", params = list(id))$created_entity_id, "SYS-003")
 
   link <- insert_proposal(con, list(task = "trace_coach", proposal_kind = "candidate_link", title = "Which?", payload_json = "{}",
                                     candidates_json = canonical_json(list(list(n = "C1", kind = "element", id = "C-004", name = "FC")))))

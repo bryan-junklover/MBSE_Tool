@@ -373,7 +373,14 @@ write_sm_ignore <- entity_writer("sm_ignore")
 write_sm_assertion <- entity_writer("sm_assertion")
 
 # Tables that aren't revisioned: settings, registries and AI records.
-PLAIN_TABLES <- c("project_meta", "id_counter", "unit", "glossary", "llm_call", "ai_proposal")
+PLAIN_TABLES <- c("project_meta", "id_counter", "unit", "glossary", "llm_call", "ai_proposal", "view_def")
+
+# Removes plain-table rows by one column. Plain tables have no revisions, so this can't be undone.
+delete_plain <- function(con, table, column, value) {
+  if (!table %in% PLAIN_TABLES) stop(table, " isn't a plain table", call. = FALSE)
+  DBI::dbExecute(con, sprintf("DELETE FROM %s WHERE %s = ?", quote_ident(con, table), quote_ident(con, column)), params = list(value))
+  invisible(NULL)
+}
 
 write_plain <- function(con, table, fields) {
   if (!table %in% PLAIN_TABLES) stop(table, " isn't a plain table", call. = FALSE)

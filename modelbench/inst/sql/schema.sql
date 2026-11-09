@@ -563,14 +563,17 @@ CREATE TABLE IF NOT EXISTS view_def (
   is_builtin      INTEGER NOT NULL DEFAULT 0 CHECK (is_builtin IN (0,1))
 );
 
--- Built-in views, seeded on every open (handoff §5.4).
+-- Built-in views, seeded on every open (handoff §5.4). Software only reads the Domain field,
+-- which new projects use, rather than a stereotype they may not have; the UPDATE carries
+-- that to projects made before.
 INSERT OR IGNORE INTO view_def (id, name, view_kind, filter_json, is_builtin) VALUES
  ('VW-all', 'All components', 'structure', '{"kinds":["component"]}', 1),
  ('VW-budget', 'Power & mass budget', 'structure', '{"kinds":["component"],"property":{"name":"mass","op":">","value":0}}', 1),
- ('VW-software', 'Software only', 'structure', '{"kinds":["component"],"stereotypes":["SW"]}', 1),
+ ('VW-software', 'Software only', 'structure', '{"kinds":["component"],"domains":["sw"]}', 1),
  ('VW-trl', 'TRL below 6', 'structure', '{"kinds":["component"],"property":{"name":"trl","op":"<","value":6}}', 1),
  ('VW-flows', 'Flows', 'flows', '{"kinds":["component","external"]}', 1),
  ('VW-functional', 'Functional', 'functional', NULL, 1);
+UPDATE view_def SET filter_json = '{"kinds":["component"],"domains":["sw"]}' WHERE id = 'VW-software' AND is_builtin = 1;
 
 -- Failure modes: what can fail, why, what happens next, and how the system responds
 -- (docs/VIEWPOINTS_AND_FAILURES.md §3). Effects and responses only; no FMEA scoring.

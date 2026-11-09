@@ -262,7 +262,7 @@ render_element_inspector <- function(row, properties, ports, requirements, stere
   )
 }
 
-render_connector_inspector <- function(row, ns, carriers = NULL) {
+render_connector_inspector <- function(row, ns, carriers = NULL, properties = NULL, addable = character(0)) {
   shiny::tags$div(
     class = "mb-inspector",
     shiny::tags$div(class = "mono mb-caption", row$id),
@@ -270,6 +270,22 @@ render_connector_inspector <- function(row, ns, carriers = NULL) {
     shiny::tags$div(class = "mono", if (is.na(row$interface)) "no interface" else row$interface),
     labelled("Label", shiny::tags$input(type = "text", value = if (is.na(row$label)) "" else row$label,
                                         onchange = change_js(ns("connector_change"), list(id = row$id)))),
+    # What the connector carries, such as 28 V or 380 W, shown on Flows (review B15).
+    if (!is.null(properties)) {
+      shiny::tagList(
+        shiny::tags$div(class = "mb-label", "Carries"),
+        if (nrow(properties) == 0L) shiny::tags$span(class = "mb-caption", "Nothing recorded."),
+        shiny::tags$div(class = "mb-prop-grid", style = "grid-template-columns: minmax(0,auto) minmax(0,1fr) auto auto", unlist(lapply(seq_len(nrow(properties)), function(i) {
+          prop <- properties[i, ]
+          value <- if (prop$value_state == "placeholder") "" else format(prop$num_value, trim = TRUE, digits = 15)
+          list(shiny::tags$span(prop$label),
+               shiny::tags$input(type = "text", value = value, placeholder = "[value]", `aria-label` = prop$label, onchange = change_js(ns("property_change"), list(id = prop$id))),
+               shiny::tags$span(class = "mb-unit", if (is.na(prop$unit)) "" else prop$unit),
+               shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", `aria-label` = paste("Remove", prop$label), onclick = event_js(ns("remove_property"), prop$id), "Remove"))
+        }), recursive = FALSE)),
+        if (length(addable) > 0L) labelled("Add a quantity", select_tag(addable, "", change_js(ns("add_connector_property"), list(id = row$id)), "Choose…"))
+      )
+    },
     if (!is.null(carriers)) {
       labelled("Carried by", select_tag(carriers$choices, if (length(carriers$selected) == 1L) carriers$selected else "",
                                         change_js(ns("realize"), list(id = row$id)), "Any connector that joins them"))
@@ -347,6 +363,7 @@ mod_model_server <- function(id, state, mode = "structure") {
     })
 
     if (mode == "structure") shiny::observe({
+      db_dep(state, "settings")
       views <- DBI::dbGetQuery(con(), "SELECT id, name FROM view_def WHERE view_kind = 'structure' ORDER BY is_builtin DESC, name")
       shiny::updateSelectInput(session, "view", choices = stats::setNames(views$id, views$name), selected = shiny::isolate(view_id()))
     })
@@ -544,7 +561,12 @@ mod_model_server <- function(id, state, mode = "structure") {
           carriers <- list(choices = stats::setNames(physical$id, sprintf("%s · %s", physical$id, physical$label)),
                            selected = DBI::dbGetQuery(con(), "SELECT target_id FROM link WHERE link_type = 'realized_by' AND source_id = ?", params = list(chosen$ids))$target_id)
         }
-        return(render_connector_inspector(row, ns, carriers))
+        quantities <- if (mode == "functional") NULL else DBI::dbGetQuery(con(), "
+          SELECT v.id, d.label, v.value_state, v.num_value, coalesce(v.unit, d.unit) AS unit FROM property_value v JOIN property_def d ON d.id = v.property_def_id
+           WHERE v.owner_kind = 'connector' AND v.owner_id = ? ORDER BY d.label", params = list(row$id))
+        numbers <- DBI::dbGetQuery(con(), "SELECT id, label FROM property_def WHERE value_type = 'number' ORDER BY label")
+        numbers <- numbers[!numbers$label %in% quantities$label, , drop = FALSE]
+        return(render_connector_inspector(row, ns, carriers, quantities, stats::setNames(numbers$id, numbers$label)))
       }
       if (chosen$kind != "element") return(NULL)
       row <- read_entity(con(), "element", chosen$ids)
@@ -655,6 +677,11 @@ mod_model_server <- function(id, state, mode = "structure") {
       if (!is.null(model_edit(state, ungroup_element(con(), input$ungroup), "ungroup"))) {
         selection(list(kind = "none", ids = character(0)))
         redraw(redraw() + 1L)
+      }
+    })
+    shiny::observeEvent(input$add_connector_property, {
+      if (nzchar(input$add_connector_property$value)) {
+        model_edit(state, add_property_to_connector(con(), input$add_connector_property$id, input$add_connector_property$value), "add quantity")
       }
     })
     shiny::observeEvent(input$remove_property, model_edit(state, delete_entity(con(), "property_value", input$remove_property), "remove property"))

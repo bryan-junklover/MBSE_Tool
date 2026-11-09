@@ -205,7 +205,7 @@ mod_review_server <- function(id, state) {
       draft <- guarded_edit(start_from_sketch(con(), input$start))
       if (is.null(draft)) return()
       invalidate_db(state, "ai")
-      state$open_in_write(list(text = draft))
+      state$open_in_write(list(text = draft, proposal = input$start))
       go_to(state, "Write", "Draft")
     })
     shiny::observeEvent(input$dismiss, {

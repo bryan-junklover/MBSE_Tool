@@ -14,6 +14,7 @@ mod_interfaces_ui <- function(id, tabs = NULL) {
       class = "mb-body",
       side_column("left", "interfaces.list", "Interfaces", width = 260,
                   shiny::textInput(ns("filter"), "Filter", placeholder = "Name"),
+                  shiny::radioButtons(ns("layer"), "Layer", c("Physical" = "physical", "Functional" = "functional"), inline = TRUE),
                   shiny::uiOutput(ns("list"))),
       shiny::tags$main(class = "mb-main", shiny::uiOutput(ns("form")), shiny::uiOutput(ns("fields"))),
       side_column("right", "interfaces.used", "Where used", width = 320, shiny::uiOutput(ns("used")))
@@ -69,7 +70,7 @@ mod_interfaces_server <- function(id, state) {
 
     rows <- shiny::reactive({
       db_dep(state, "model")
-      all <- interface_list(con())
+      all <- interface_list(con(), if (is.null(input$layer)) "physical" else input$layer)
       needle <- trimws(if (is.null(input$filter)) "" else input$filter)
       if (nzchar(needle)) all <- all[grepl(tolower(needle), tolower(all$name), fixed = TRUE), , drop = FALSE]
       all
@@ -83,7 +84,7 @@ mod_interfaces_server <- function(id, state) {
       id <- selected()
       row <- if (is.null(id)) NULL else read_entity(con(), "interface", id)
       if (!is.null(row)) return(row)
-      all <- interface_list(con())
+      all <- interface_list(con(), if (is.null(input$layer)) "physical" else input$layer)
       if (nrow(all) == 0L) NULL else read_entity(con(), "interface", all$id[1])
     })
 
@@ -98,6 +99,7 @@ mod_interfaces_server <- function(id, state) {
         shiny::tags$div(class = "mb-fields",
                         labelled("Name", shiny::tags$input(type = "text", class = "mono", value = row$name, onchange = change("name"))),
                         labelled("Flow type", select_tag(FLOW_TYPES, row$flow_type, change("flow_type"))),
+                        labelled("Layer", select_tag(c("Physical" = "physical", "Functional" = "functional"), row$layer, change("layer"), label = "Layer")),
                         labelled("Rate", shiny::tags$input(type = "text", value = rate, placeholder = "not set", onchange = change("rate"))),
                         labelled("Transport", shiny::tags$input(type = "text", value = text(row$transport), placeholder = "not set", onchange = change("transport")))),
         labelled("Description", shiny::tags$input(type = "text", value = text(row$description), onchange = change("description")))
@@ -155,7 +157,8 @@ mod_interfaces_server <- function(id, state) {
     })
 
     shiny::observeEvent(input$add, {
-      written <- model_edit(state, write_interface(con(), fields = list(name = next_interface_name(con()), flow_type = "data")), "add interface")
+      written <- model_edit(state, write_interface(con(), fields = list(name = next_interface_name(con()), flow_type = "data",
+                                                                               layer = if (is.null(input$layer)) "physical" else input$layer)), "add interface")
       if (!is.null(written)) selected(written$id)
     })
     shiny::observeEvent(input$delete, {

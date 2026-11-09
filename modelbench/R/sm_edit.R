@@ -105,3 +105,27 @@ unscoped_events <- function(con, sm_id) {
   DBI::dbGetQuery(con, "SELECT e.id, e.name FROM sm_event e WHERE e.sm_id = ?
                           AND NOT EXISTS (SELECT 1 FROM sm_event_scope s WHERE s.event_id = e.id) ORDER BY e.name", params = list(sm_id))
 }
+
+# An assertion's description or the requirement it verifies. The requirement lives in the
+# assertion and in its verified_by link, so both change together (review B5).
+update_assertion <- function(con, assertion_id, field, value, author = "engineer") {
+  row <- read_entity(con, "sm_assertion", assertion_id)
+  if (is.null(row)) refuse("That assertion no longer exists.")
+  value <- trimws(if (is.null(value)) "" else value)
+  if (field == "description") {
+    if (!nzchar(value)) refuse("An assertion needs a description.")
+    return(write_sm_assertion(con, assertion_id, list(description = value), author, "Assertion edited"))
+  }
+  if (field != "requirement_id") refuse("An assertion's ", field, " can't be changed here. Delete it and add it again.")
+  if (nzchar(value) && is.null(read_entity(con, "requirement", value))) refuse("That requirement isn't in the model.")
+  with_change_set(con, function(change_set) {
+    old <- DBI::dbGetQuery(con, "SELECT id FROM link WHERE link_type = 'verified_by' AND target_kind = 'sm_assertion' AND target_id = ?", params = list(assertion_id))$id
+    for (id in old) delete_entity(con, "link", id, author, "Assertion now verifies another requirement", change_set)
+    written <- write_sm_assertion(con, assertion_id, list(requirement_id = if (nzchar(value)) value else NA_character_), author, "Requirement changed", change_set)
+    if (nzchar(value)) {
+      write_link(con, fields = list(link_type = "verified_by", source_kind = "requirement", source_id = value, target_kind = "sm_assertion", target_id = assertion_id),
+                 author = author, note = "Assertion verifies requirement", change_set = change_set)
+    }
+    written
+  })
+}

@@ -93,6 +93,7 @@ run_link_coach <- function(con, target_kind, target_id) {
 # --- The review queue ---
 
 proposal_list <- function(con, status = "open", sources = c("ai", "structural")) {
+  reconcile_proposals(con)
   marks <- paste(rep("?", length(sources)), collapse = ", ")
   rows <- DBI::dbGetQuery(con, sprintf("
     SELECT p.*, c.provider_id, c.model, c.prompt_version FROM ai_proposal p LEFT JOIN llm_call c ON c.id = p.llm_call_id
@@ -139,13 +140,43 @@ keep_sketch <- function(con, id, note, author = "engineer") {
 }
 
 # "Start from this in Write": returns the draft text. The commit stays the engineer's.
+# It stays open until the draft is saved or committed (keep_started_sketch), so leaving Write
+# without saving doesn't lose it.
 start_from_sketch <- function(con, id) {
-  proposal <- DBI::dbGetQuery(con, "SELECT payload_json FROM ai_proposal WHERE id = ?", params = list(id))
+  proposal <- DBI::dbGetQuery(con, "SELECT payload_json, status FROM ai_proposal WHERE id = ?", params = list(id))
   if (nrow(proposal) == 0L) refuse("That proposal no longer exists.")
+  if (proposal$status != "open") refuse("That proposal has already been handled.")
   draft <- jsonlite::fromJSON(proposal$payload_json, simplifyVector = FALSE)$draft
   if (is.null(draft) || !nzchar(draft)) refuse("This proposal has no starting draft.")
-  update_proposal(con, id, list(status = "kept", engineer_note = "Started a draft from this in Write"))
   draft
+}
+
+# Marks a sketch kept once a draft started from it is saved as a requirement.
+keep_started_sketch <- function(con, proposal_id, requirement_id) {
+  row <- DBI::dbGetQuery(con, "SELECT status FROM ai_proposal WHERE id = ?", params = list(proposal_id))
+  if (nrow(row) == 0L || row$status != "open") return(invisible(NULL))
+  update_proposal(con, proposal_id, list(status = "kept", engineer_note = sprintf("Started %s from this in Write", requirement_id),
+                                         created_entity_kind = "requirement", created_entity_id = requirement_id))
+}
+
+# Keeps proposals in step with the model: one kept whose creation has since gone (Undo, a
+# rollback, a delete) reopens; an open one about something no longer in the model is
+# superseded (review D3, D4).
+reconcile_proposals <- function(con) {
+  kinds <- unique(c(revisioned_kinds(), "element"))
+  exists_now <- function(kind, id) !is.na(kind) && !is.na(id) && kind %in% kinds && polymorphic_exists(con, kind, id)
+  kept <- DBI::dbGetQuery(con, "SELECT id, created_entity_kind, created_entity_id FROM ai_proposal WHERE status = 'kept' AND created_entity_id IS NOT NULL")
+  for (i in seq_len(nrow(kept))) {
+    if (!exists_now(kept$created_entity_kind[i], kept$created_entity_id[i])) {
+      update_proposal(con, kept$id[i], list(status = "open", engineer_note = NA_character_, created_entity_kind = NA_character_,
+                                            created_entity_id = NA_character_))
+    }
+  }
+  open <- DBI::dbGetQuery(con, "SELECT id, target_kind, target_id FROM ai_proposal WHERE status = 'open' AND source = 'ai' AND target_id IS NOT NULL")
+  for (i in seq_len(nrow(open))) {
+    if (!exists_now(open$target_kind[i], open$target_id[i])) update_proposal(con, open$id[i], list(status = "superseded"))
+  }
+  invisible(NULL)
 }
 
 # Structural gaps come from code. A dismissed one stays dismissed (BUILD_PLAN §5), and

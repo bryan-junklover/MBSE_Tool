@@ -40,7 +40,7 @@ mod_spec_ui <- function(id, tabs = NULL) {
 }
 
 # reactable columns. Gaps are amber text with a word, never colour alone.
-spec_columns <- function() {
+spec_columns <- function(coach_state = character(0)) {
   gap_text <- function(value, label) {
     if (is.na(value) || !nzchar(value)) shiny::tags$span(class = "mb-gap", label) else value
   }
@@ -50,7 +50,10 @@ spec_columns <- function() {
     req_type = reactable::colDef(name = "Type", width = 100, style = list(whiteSpace = "nowrap"), cell = function(value) gap_text(value, "missing")),
     verification_method = reactable::colDef(name = "Verify by", width = 110, style = list(whiteSpace = "nowrap"), cell = function(value) gap_text(value, "missing")),
     allocated_to = reactable::colDef(name = "Allocated to", minWidth = 110, cell = function(value) gap_text(value, "none")),
-    status = reactable::colDef(name = "Status", width = 90, style = list(whiteSpace = "nowrap")),
+    status = reactable::colDef(name = "Status", width = 90, cell = function(value, index) {
+      # A committed requirement nobody coached says so (review F5).
+      if (identical(value, "committed") && identical(coach_state[index], "uncoached")) shiny::tagList(value, shiny::tags$div(class = "mb-gap", style = "font-size:11px", "uncoached")) else value
+    }),
     gate_score = reactable::colDef(name = "Score", width = 64, style = list(whiteSpace = "nowrap"), class = "mono", cell = function(value, index) {
       if (is.na(value)) return("")
       if (value < 50L) shiny::tags$span(class = "mb-gap", style = "font-weight:500", value) else value
@@ -114,10 +117,11 @@ mod_spec_server <- function(id, state) {
     })
 
     output$table <- reactable::renderReactable({
+      coach <- filtered()$coach_state
       data <- filtered()[, c("id", "text", "req_type", "verification_method", "allocated_to", "status", "gate_score")]
       chosen <- selected()
       reactable::reactable(
-        data, columns = spec_columns(), pagination = FALSE, highlight = TRUE, compact = TRUE, borderless = FALSE,
+        data, columns = spec_columns(coach), pagination = FALSE, highlight = TRUE, compact = TRUE, borderless = FALSE,
         onClick = reactable::JS(sprintf("function(rowInfo) { Shiny.setInputValue('%s', rowInfo.original.id, {priority: 'event'}); }", ns("select"))),
         rowStyle = function(index) {
           if (identical(data$id[index], chosen)) list(outline = "2px solid var(--ink)", outlineOffset = "-2px", background = "var(--surface-muted)")
@@ -164,13 +168,19 @@ mod_spec_server <- function(id, state) {
                         shiny::textInput(ns("d_title"), "Short title", value(row$short_title)),
                         shiny::selectInput(ns("d_parent"), "Parent", choices = with_blank(parents, "None"), selected = value(row$parent_id), selectize = FALSE),
                         shiny::selectInput(ns("d_type"), "Type", choices = with_blank(REQ_TYPES), selected = value(row$req_type), selectize = FALSE),
-                        shiny::selectInput(ns("d_verify"), "Verify by", choices = with_blank(VERIFY_METHODS), selected = value(row$verification_method), selectize = FALSE)),
+                        shiny::selectInput(ns("d_verify"), "Verify by", choices = with_blank(VERIFY_METHODS), selected = value(row$verification_method), selectize = FALSE),
+                        shiny::selectInput(ns("d_level"), "Level", choices = c("Stakeholder" = "stakeholder", "System" = "system", "Subsystem" = "subsystem"),
+                                           selected = row$level, selectize = FALSE)),
+        shiny::uiOutput(ns("traces")),
         shiny::tags$details(class = "mb-fold", open = if (nzchar(value(row$rationale))) NA,
                             shiny::tags$summary("Rationale"),
                             aria_label(shiny::textAreaInput(ns("d_rationale"), NULL, value(row$rationale), rows = 3, width = "100%"), "textarea", "Rationale")),
         shiny::uiOutput(ns("findings")),
         shiny::uiOutput(ns("evidence")),
         shiny::actionButton(ns("rewrite"), "Rewrite it in Write", class = "mb-btn"),
+        if (row$status == "committed" && identical(row$coach_state, "uncoached")) {
+          shiny::tagList(shiny::actionButton(ns("ask_coach"), "Ask the coach", class = "mb-btn mb-btn-ai"), shiny::uiOutput(ns("coach_result")))
+        },
         danger_zone(if (row$status == "draft") {
           confirm_button("Delete draft…", ns("delete_draft"), id, sprintf("Delete draft %s?", id),
                          paste(delete_effects_text(shiny::isolate(delete_effects(con(), "requirement", id)))), confirm = "Delete draft")
@@ -178,6 +188,28 @@ mod_spec_server <- function(id, state) {
           shiny::actionButton(ns("deprecate"), "Deprecate…", class = "mb-btn")
         })
       )
+    })
+    # Coaching a committed requirement that was committed without one (review F5).
+    coach_task <- shiny::ExtendedTask$new(function(connection, text, parent) run_coach_async(connection, text, "req_light_check", parent))
+    coach_for <- shiny::reactiveVal(NULL)
+    shiny::observeEvent(input$ask_coach, {
+      row <- read_entity(con(), "requirement", selected())
+      coach_for(row$id)
+      coach_task$invoke(con(), row$text, if (is.na(row$parent_id)) NULL else row$parent_id)
+    })
+    output$coach_result <- shiny::renderUI({
+      if (coach_task$status() == "running") return(shiny::tags$span(class = "mb-caption", "The coach is reading it…"))
+      result <- coach_task$result()
+      if (!isTRUE(result$ok)) return(shiny::tags$span(class = "mb-gap", result$error %||% "The coach couldn't run."))
+      questions <- vapply(result$answer$questions %||% list(), function(q) q$text, "")
+      shiny::tags$div(class = "mb-caption",
+                      if (length(questions) > 0L) shiny::tagList("The coach asks:", shiny::tags$ul(lapply(questions, shiny::tags$li))) else "The coach has no questions.",
+                      "It's marked coached.")
+    })
+    shiny::observeEvent(coach_task$result(), {
+      result <- coach_task$result()
+      if (!isTRUE(result$ok) || is.null(coach_for())) return()
+      if (!is.null(model_edit(state, mark_requirement_coached(con(), coach_for(), result$text, result$call_id), "coach"))) invalidate_db(state, "ai")
     })
     shiny::observeEvent(input$delete_draft, {
       if (!is.null(model_edit(state, delete_draft_requirement(con(), input$delete_draft), "delete draft"))) selected(NULL)
@@ -196,11 +228,43 @@ mod_spec_server <- function(id, state) {
       shiny::removeModal()
       selected(NULL)
     })
+    # Traces to other requirements outside the parent tree (review B10).
+    output$traces <- shiny::renderUI({
+      row <- current()
+      shiny::req(row)
+      links <- requirement_links(con(), row$id)
+      others <- requirement_outline(con())
+      others <- others[others$id != row$id, ]
+      choices <- stats::setNames(others$id, ifelse(is.na(others$short_title), others$id, paste(others$id, others$short_title)))
+      shiny::tags$div(
+        lapply(c(derives_from = "Derives from", refines = "Refines"), function(label) {
+          type <- names(which(c(derives_from = "Derives from", refines = "Refines") == label))
+          mine <- links[links$link_type == type, , drop = FALSE]
+          shiny::tags$div(
+            shiny::tags$div(class = "mb-label", label),
+            lapply(seq_len(nrow(mine)), function(i) {
+              shiny::tags$div(class = "mb-event-row",
+                              shiny::tags$span(class = "mono", mine$target_id[i]), shiny::tags$span(if (is.na(mine$short_title[i])) "" else mine$short_title[i]),
+                              shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", `aria-label` = paste("Remove", label, mine$target_id[i]),
+                                                 onclick = event_js(ns("trace_remove"), mine$id[i]), "Remove"))
+            }),
+            select_tag(choices[!choices %in% mine$target_id], "", change_js(ns("trace_add"), list(type = type)), "Add…", label = paste(label, "another requirement"))
+          )
+        })
+      )
+    })
+    shiny::observeEvent(input$trace_add, {
+      if (nzchar(input$trace_add$value)) model_edit(state, link_requirements(con(), input$trace_add$type, selected(), input$trace_add$value), "trace")
+    })
+    shiny::observeEvent(input$trace_remove, model_edit(state, delete_entity(con(), "link", input$trace_remove), "remove trace"))
+    shiny::observeEvent(input$d_level, save_detail("level", input$d_level), ignoreInit = TRUE)
+
     output$findings <- shiny::renderUI({
       row <- current()
       shiny::req(row)
       db_dep(state, "model")
-      render_findings(requirement_findings(row, model_terms(con())))
+      parent_level <- if (is.na(row$parent_id)) NULL else read_entity(con(), "requirement", row$parent_id)$level
+      render_findings(requirement_findings(row, model_terms(con()), parent_level))
     })
 
     output$evidence <- shiny::renderUI({
@@ -283,7 +347,9 @@ mod_spec_server <- function(id, state) {
         import_requirements(con(), parsed, file$name)
       })
       if (is.null(result)) return()
-      import_note(sprintf("Imported %s: %d added as drafts, %d to fix.", file$name, length(result$added), result$queued))
+      push_edit(state, result, sprintf("import %s", file$name))
+      import_note(sprintf("Imported %s: %d added as drafts, %d to fix%s.", file$name, length(result$added), result$queued,
+                          if (result$skipped > 0L) sprintf(", %d already in the specification", result$skipped) else ""))
       invalidate_db(state, "spec")
     })
 

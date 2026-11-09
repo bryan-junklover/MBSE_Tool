@@ -1,6 +1,6 @@
 # ModelBench workflow review
 
-**Date:** 2026-11-06 · **Reviewed:** `ux-review-fixes` @ efef5a0 · **Status:** fixed so far: the doc claims; A1–A7; B1–B4 and B6–B9; C1–C8; D1 and D2; E1–E3; F3 and F6; G1, G2, G4, G5 and G7. Partly fixed: B5. Open: B10–B15; C9–C11; D3–D7; F1, F2, F4, F5 and F7; G3, G6, G8 and G9.
+**Date:** 2026-11-06 · **Reviewed:** `ux-review-fixes` @ efef5a0 · **Status:** every item is fixed or settled. F7 is kept by design, and new analyses still come from code (B15).
 
 **Method**
 
@@ -128,7 +128,7 @@ scenario can never be deleted.
 - **Fix:** turn Events and variables into an editable table. Add rename and delete for the
   machine, and a list of ignores.
 
-**B5 (P2) Assertions can't be edited or deleted.** — **Partly fixed.** An assertion can be deleted, with its runs and link. To change one, delete it and add it again. The duplicate `requirement_id` column is still there.
+**B5 (P2) Assertions can't be edited or deleted.** — **Fixed.** Description and requirement are editable, and the requirement and its verified_by link change together. Script and expectation are changed by deleting and adding again. Before that: An assertion can be deleted, with its runs and link. To change one, delete it and add it again. The duplicate `requirement_id` column is still there.
 - Their `requirement_id` duplicates the `verified_by` link, and it blocks deleting the
   requirement even after that link is removed.
 - **Fix:** add edit and delete, and take the requirement from the link.
@@ -163,16 +163,16 @@ component.** — **Fixed.**
 - **Fix:** add **Remove** beside each value. Allow edits to a definition's label and roll-up, and a
   unit change within the same quantity. Allow delete when it's unused.
 
-**B10 (P2) `derives_from` and `refines` links can't be created.** The exports have columns for
+**B10 (P2) `derives_from` and `refines` links can't be created.** — **Fixed.** The Specification inspector has **Derives from** and **Refines**, each with Add and Remove. The exports have columns for
 them, and those are always empty.
 - **Fix:** add pickers for both in the Specification inspector.
 
 **B11 (P2) Functional interfaces don't appear on the Interfaces screen, and can't be created
-there.** IF-011 to IF-017 in the sample can't be browsed or edited. The Add-port dialog offers both
+there.** — **Fixed.** A **Layer** switch lists either layer, a new interface takes the current one, and the form has a Layer control. Ports get their own layer's interfaces (B7). IF-011 to IF-017 in the sample can't be browsed or edited. The Add-port dialog offers both
 layers to every element.
 - **Fix:** add a Layer control and filter, and offer only the layer that matches the element.
 
-**B12 (P2) Saved views and stereotypes are fixed.**
+**B12 (P2) Saved views and stereotypes are fixed.** — **Fixed.** Project has a Saved views panel, by domain or stereotype. Before that: **Software only** filters on domain, existing projects included. Stereotypes can be added and deleted in Project. There's still no editor for saved views.
 - A new project has no stereotypes, and nothing creates them.
 - **Software only** filters on the `SW` stereotype, not on the Domain field the app now uses. So
   it's empty in a new project.
@@ -180,13 +180,13 @@ layers to every element.
 - **Fix:** filter Software only on domain, and add a small editor for stereotypes and views, or
   hide those controls when there are none.
 
-**B13 (P3) Projects can only be created and switched.** There's no rename, copy or delete, and the
+**B13 (P3) Projects can only be created and switched.** — **Fixed.** A project can be renamed, copied and opened, and another project deleted. There's no rename, copy or delete, and the
 project name can't be edited after it's created.
 
 **B14 (P3) A requirement's level isn't in the inspector, and parent and child levels aren't
-checked.** A stakeholder requirement can sit under a subsystem one.
+checked.** — **Fixed.** Level is in the inspector. A child at a higher level than its parent is a finding. A stakeholder requirement can sit under a subsystem one.
 
-**B15 (P3) Analyses, analysis limits and connector quantities can't be added from the app.**
+**B15 (P3) Analyses, analysis limits and connector quantities can't be added from the app.** — **Fixed for limits and quantities.** Project has Analysis limits, and connectors record what they carry. New analyses still come from code, by design.
 
 ## C. Checks and verification that can be fooled
 
@@ -258,14 +258,14 @@ The how-to says to "decide they're acceptable", but nothing records that decisio
   it.
 
 **C9 (P3) The gate score and resolved terms are stored when saved, and drift as the model
-changes.** The Specification score and "Lowest score first" can be out of date; the inspector's
+changes.** — **Fixed for the score.** Specification scores each requirement live. The Specification score and "Lowest score first" can be out of date; the inspector's
 findings are live.
 - **Fix:** re-gate saved requirements on model changes, or compute the score for display.
 
-**C10 (P3) An assertion's `set` values aren't converted to the variable's type.** `{"mode": 1}`
+**C10 (P3) An assertion's `set` values aren't converted to the variable's type.** — **Fixed.** A value takes its variable's type, and one that can't is refused in plain words. `{"mode": 1}`
 fails `mode == 1`. The Fire buttons reuse those values.
 
-**C11 (P3) No cross-check between failure links and the state machine.** Nothing flags an event
+**C11 (P3) No cross-check between failure links and the state machine.** — **Fixed.** A transition on a different event from the detecting one is flagged too. Before that: A failure detected by an event that no transition takes is flagged. A handling transition on a different event still isn't. Nothing flags an event
 that detects a failure but that no state handles, or a handling transition on a different event.
 
 ## D. Undo, projects and AI drafts
@@ -296,22 +296,22 @@ can't be undone.** *Doc claim wrong.* — **Fixed.**
   collide between projects, and the failure-mode selection, behaviour focus and return bar.
 - **Fix:** reset per-project state when the connection changes.
 
-**D3 (P2) Undoing an AI Keep leaves the proposal marked kept, pointing at nothing.** It can't be
+**D3 (P2) Undoing an AI Keep leaves the proposal marked kept, pointing at nothing.** — **Fixed.** A kept proposal whose creation is gone reopens. It can't be
 kept again.
 - **Fix:** reopen a proposal when undo or rollback removes what it created.
 
-**D4 (P3) AI proposals whose target was deleted stay open for ever.**
+**D4 (P3) AI proposals whose target was deleted stay open for ever.** — **Fixed.** Proposals about something deleted are superseded, and **Start from this in Write** counts as kept only once the draft is saved.
 - They can't be kept, because the write path refuses them.
 - **Start from this in Write** marks a proposal kept before anything is saved.
 - **Fix:** supersede proposals with a missing target. Mark one kept only when the draft is saved.
 
-**D5 (P2) Rollback doesn't leave drafts alone, though its dialog says it does.** A draft committed
+**D5 (P2) Rollback doesn't leave drafts alone, though its dialog says it does.** — **Fixed.** A requirement committed since the baseline goes back to its draft. Links from drafts are left out of baselines and comparisons. A draft committed
 after the baseline is deleted outright: it can only be recovered from the safety baseline. Links
 from drafts are baselined, so rollback removes them.
 - **Fix:** put such requirements back to their draft revision, and leave draft-end links out of
   baselines.
 
-**D6 (P2) Change cards are poor for deletions and the newer kinds.**
+**D6 (P2) Change cards are poor for deletions and the newer kinds.** — **Fixed.** The impact graph now runs from a failure mode's subject, detector and handler to the failure mode, from a host to its software, and from a machine's parts to the machine. The battery change now reaches FM-0003 and FM-0004. Before that: A card leads with what the user acted on, and failure modes, links, budgets, transitions and waivers have readable titles. Impact edges for the newer kinds are still missing.
 - A deleted component's card is titled by its first dependant ("LINK · L-0310 removed").
 - Removed items show "0 elements impacted".
 - Failure modes, transitions, waivers and the newer links have no impact edges.
@@ -319,7 +319,7 @@ from drafts are baselined, so rollback removes them.
 - **Fix:** title a card by what the user acted on, and add title, text and impact cases for these
   kinds.
 
-**D7 (P3) Some project state is outside baselines.** The glossary, units, prefixes, scope,
+**D7 (P3) Some project state is outside baselines.** — **Documented.** The guide says what a baseline holds and what it doesn't. The glossary, units, prefixes, scope,
 viewpoints, layout and saved views aren't captured, so a rollback doesn't restore a removed alias.
 - **Fix:** say so in the guide, or snapshot the glossary and viewpoints into a baseline.
 
@@ -345,46 +345,46 @@ then errors. The transition can't be saved until its guard is rewritten, and not
 
 ## F. Requirements entry and import
 
-**F1 (P2) Exporting to CSV and importing it back makes duplicates and drops the metadata.** Import
+**F1 (P2) Exporting to CSV and importing it back makes duplicates and drops the metadata.** — **Fixed.** Import reads level, type, verify by, short title and rationale, and skips rows already in the specification. There's still no ReqIF import. Import
 reads only the text column, at level "system". Re-importing the sample's export added 9 new
 drafts. Because of B1, they can't be removed. There's no ReqIF import.
 - **Fix:** map the known columns, and update by id when it matches an existing requirement.
 
-**F2 (P2) Import triage can't accept a row holding `[value]`,** though a draft may hold one.
+**F2 (P2) Import triage can't accept a row holding `[value]`,** *(fixed: such rows import, or leave triage, as drafts)* though a draft may hold one.
 - **Fix:** add such a row as a draft.
 
 **F3 (P2) A term added as an interface field never resolves, and adding it again gives a raw
 UNIQUE error.** — **Fixed.** Field names resolve to the element that sends them, and the duplicate reads in plain words (G5). `model_terms` doesn't read interface fields.
 
-**F4 (P2) An unsaved draft is silently replaced.** Choosing another outline item, **Rewrite it in
+**F4 (P2) An unsaved draft is silently replaced.** — **Fixed.** Write asks before replacing text that isn't saved. Choosing another outline item, **Rewrite it in
 Write**, **+ Requirement** or a scope-gap draft all overwrite the text without asking.
 *From the code.*
 
-**F5 (P2) There's no way to find uncoached requirements.** Coach state isn't shown in
+**F5 (P2) There's no way to find uncoached requirements.** — **Fixed.** **Ask the coach** in Specification marks it coached without changing its text or evidence. Before that: Specification marks uncoached requirements under their status. Coaching one still means rewriting it in Write. Coach state isn't shown in
 Specification. The only way to coach one is to rewrite and re-commit it, which makes its evidence
 stale (C1). Committing without a coach downgrades an already-coached requirement.
 - **Fix:** show coach state, and add **Ask the coach** that doesn't bump the revision.
 
 **F6 (P3) Save draft accepts empty text.** — **Fixed.**
 
-**F7 (P3) A term added as a property of a second element stops resolving everywhere.**
+**F7 (P3) A term added as a property of a second element stops resolving everywhere.** — **Kept by design.** Resolving it to the common parent made "mass" a known word, which split "gimbal mass" and stopped it being added as its own term. A shared property stays unresolved.
 
 ## G. Smaller dead ends and raw errors (P3)
 
 - **G1** *(fixed)***:** outside equipment placed on Flows before there's a system block is drawn twice
   (`structure_view` adds top-level externals twice when the root is empty). *Confirmed.*
 - **G2** *(fixed)***:** double-clicking outside equipment opens an empty "level" inside it, with no way back.
-- **G3:** changing a step's **Kind** to or from a fragment gives raw CHECK errors. Deleting a
+- **G3** *(fixed)***:** changing a step's **Kind** to or from a fragment gives raw CHECK errors. Deleting a
   fragment's opener leaves its closer behind.
 - **G4:** with every component already a lifeline, **+ Lifeline** offers an empty list, and
   confirming gives a raw NOT NULL error.
 - **G5** *(fixed)***:** duplicate port, interface or field names gave raw UNIQUE errors. Those, and other NOT NULL and CHECK refusals, now read in plain words.
-- **G6:** AI-sketched steps can only be reviewed one at a time; reviewing the scenario doesn't
+- **G6** *(fixed)***:** AI-sketched steps can only be reviewed one at a time; reviewing the scenario doesn't
   review its steps.
 - **G7** *(fixed)***:** with nothing selected, the inspector labels every budget "This level", whatever the
   level.
-- **G8:** a budget on a ×4 part counts four times the part's value, and nothing says so.
-- **G9:** a scenario can't have the other kind of diagram added later.
+- **G8** *(fixed: the scope reads "Propulsion (all 4)")***:** a budget on a ×4 part counts four times the part's value, and nothing says so.
+- **G9** *(fixed)***:** a scenario can't have the other kind of diagram added later.
 
 ## Doc corrections needed now — **Fixed**
 

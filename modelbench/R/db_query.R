@@ -57,7 +57,10 @@ model_hash <- function(con) {
 baselineable_entities <- function(con) {
   items <- live_entities(con)
   excluded <- DBI::dbGetQuery(con, "SELECT id FROM requirement WHERE status <> 'committed'")$id
-  items[!(items$entity_kind == "requirement" & items$entity_id %in% excluded), , drop = FALSE]
+  # Links from a draft go with it: neither is part of the baselined model.
+  draft_links <- DBI::dbGetQuery(con, "SELECT id FROM link WHERE (source_kind = 'requirement' AND source_id IN (SELECT id FROM requirement WHERE status <> 'committed'))
+                                          OR (target_kind = 'requirement' AND target_id IN (SELECT id FROM requirement WHERE status <> 'committed'))")$id
+  items[!(items$entity_kind == "requirement" & items$entity_id %in% excluded) & !(items$entity_kind == "link" & items$entity_id %in% draft_links), , drop = FALSE]
 }
 
 # Fields that don't bear on what a test proved: bookkeeping, layout and wording around the

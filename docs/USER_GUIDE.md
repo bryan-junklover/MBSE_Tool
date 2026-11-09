@@ -88,6 +88,9 @@ thing they're about. A bar then offers **Back to …** the screen you came from.
 
 - **Open project** switches projects. **New project name** and **Create project** start an
   empty one.
+- **Name of this project** renames it. **Copy as new project…** copies everything, with its
+  history and baselines, and opens the copy. **Delete another project…** deletes a project
+  you don't have open, for good.
 - **Scope:** a few sentences on what the system is. It's saved as you type. The AI is given it
   for context, and documents quote it.
 - **ID prefixes:** the prefixes for new requirements and components, such as `SYS` and `C`.
@@ -95,6 +98,12 @@ thing they're about. A bar then offers **Back to …** the screen you came from.
 
 **Units & properties**
 
+- **Analysis limits** set a limit on a calculated result, such as endurance, over part of the
+  system. Health and baselines report any that miss.
+- **Saved views** add your own Structure views, by domain or stereotype, offered under
+  **Saved view**. Built-in views stay.
+- **Stereotypes** label kinds of component, such as HW, SW or Avionics. One no component uses
+  can be deleted.
 - **Properties** are what a component can hold, such as Mass in kg or Supplier as text. A
   number property can roll up: sum, largest or smallest, up the tree and times how many of each
   part.
@@ -148,13 +157,20 @@ Write one requirement at a time.
   **Short title** go with the draft.
 - `[value]` marks a number still to be decided. A draft holding one can be saved
   (**Save draft**) but not committed.
-- **Commit to specification** adds it. **New requirement** clears the page.
+- **Commit to specification** adds it. **New requirement** clears the page. Anything that would
+  replace text you haven't saved asks first.
 
 ### Specification
 
 The outline and table of every requirement, sortable by gate score (**Lowest score first**).
 
-- Select a requirement to edit its details in the inspector.
+- Select a requirement to edit its details in the inspector: short title, parent, type,
+  verify by, level and rationale. **Derives from** and **Refines** trace it to other
+  requirements outside the parent tree. A child at a higher level than its parent is
+  flagged.
+- The score is the gate's score against the model as it is now. A committed requirement no
+  coach reviewed is marked *uncoached* under its status; **Ask the coach** reviews it as it
+  stands and marks it coached, without changing its text or its evidence.
 - **Rewrite it in Write** reopens committed text in Draft, and the gate checks it again.
 - **Deprecate…** retires a committed requirement, with your reason. It leaves the
   specification, the counts and Health, but its history and baselines keep it. A failure it
@@ -170,8 +186,10 @@ The outline and table of every requirement, sortable by gate score (**Lowest sco
   - Assertions that verify the requirement are listed too, with how they run now and their
     last recorded result.
   - A requirement counts as verified when at least one result passes and none fails.
-- **Import** from CSV, Excel or text. Each row is gate-checked, and you either add it as a draft
-  or skip it.
+- **Import** from CSV, Excel or text. Rows that pass the gate, or hold only a `[value]`, become
+  drafts; the rest wait for you to fix or skip. Level, type, verify by, short title and
+  rationale columns are read back, as an export writes them, and a row whose text is already
+  in the specification is skipped, so re-importing an export adds nothing twice.
 - **Export** as ReqIF, CSV, Markdown or PDF.
 
 ### Traceability
@@ -198,8 +216,8 @@ the inspector on the right.
 - **Opening a block:** double-click a component to open the level inside it. The breadcrumb
   takes you back up.
 - **Group into subsystem** wraps the selected components in a new parent.
-- **Saved view** picks a filtered view: All components, Power & mass budget, Software only, or
-  TRL below 6.
+- **Saved view** picks a filtered view: All components, Power & mass budget, Software only
+  (components whose domain is Software), or TRL below 6.
 - **The inspector**, for a selected component:
   - name, stereotype, domain (hardware, software, hardware and software, other), status, how
     many, and description;
@@ -225,7 +243,8 @@ the inspector on the right.
 ### Flows
 
 The same structure, coloured by what moves along each connector: data, energy or matter.
-**Show** picks the flow types, and **Show flow quantities** adds rates.
+**Show** picks the flow types, and **Show flow quantities** adds rates and what each connector
+carries. Select a connector to record what it **Carries**, such as 28 V or 380 W.
 
 Flows also shows **outside equipment**: things beyond the system boundary that it exchanges
 with, such as an operator or a base station. The **Outside equipment** tool adds one, and
@@ -243,7 +262,8 @@ performs it.
 
 ### Interfaces
 
-The interface dictionary.
+The interface dictionary. **Layer** switches between physical interfaces, which ports on
+components carry, and functional ones, which functions exchange.
 
 - Each interface has a flow type, a rate, a transport, and fields.
 - Each field has a type, a unit, and a range, which can be "to be decided" or "not applicable".
@@ -277,9 +297,12 @@ Sequence or activity diagrams, edited as a table of steps.
   drafts.
 - **Highlighting:** amber means a step names a field its interface doesn't have. Dashed blue is
   an AI draft that needs your review.
-- **Edit scenario** has its name, description, its lifelines (each with **Remove**, which takes
+- Deleting a fragment's start or end removes the whole fragment, with its "else" lines, and
+  changing a step's kind fills in what the new kind needs.
+- **Edit scenario** has **Add the activity diagram** (or sequence) when it has only one, its
+  name, description, its lifelines (each with **Remove**, which takes
   its messages) and **Delete scenario…**. An AI sketch that's wrong can be thrown away with
-  **Discard sketch…**.
+  **Discard sketch…**. Reviewing a sketch reviews its steps with it.
 
 ### State machines
 
@@ -305,7 +328,9 @@ event or variable.
   in every state that isn't final, and a new state ticks every event, so they're checked from
   the start; untick where an event doesn't apply. Events no state must handle are named at the
   top.
-- **Checks** holds assertions, each with **Delete**. **Add assertion…** builds one from a start state, a list of events
+- **Checks** holds assertions. Each one's description and the requirement it verifies can be
+  changed, and it has **Delete**. To change what it fires or expects, delete it and add it
+  again. **Add assertion…** builds one from a start state, a list of events
   and the state it should end in, optionally tied to a requirement. **Run and record** runs them
   all, and a requirement's checks run live.
 - **The simulator** runs under the canvas. Choose where to start, fire events (those that can fire
@@ -375,7 +400,10 @@ The AI's questions and sketches, plus structural gaps the code finds.
 
 - **Ask AI about gaps** asks for more.
 - **Keep:** a sketch joins the model only when you add it with a note in your own words, and it
-  then stays an unreviewed draft until you review it.
+  then stays an unreviewed draft until you review it. If what you kept is undone or deleted,
+  the item opens again; an item about something no longer in the model is closed.
+- **Start from this in Write** opens a suggested requirement in Draft. It counts as kept once
+  you save or commit it.
 - **Dismiss with reason** closes an item.
 - **Show on diagram** goes to what an item is about. **See the prompt** shows exactly what was
   sent.
@@ -386,8 +414,12 @@ The AI's questions and sketches, plus structural gaps the code finds.
   where they start.
 - Select a change to see what it reaches. **Rate and explain with AI** adds a narrative.
 - **Roll back…** puts the model back as it was at a baseline. It saves a safety baseline first,
-  so a rollback can itself be undone. Requirements committed since the baseline are removed,
-  even ones that were drafts then; the safety baseline keeps them.
+  so a rollback can itself be undone. Drafts stay as they are, and a requirement committed
+  since the baseline goes back to the draft it was then.
+- **What a baseline holds:** the model: requirements that were committed, structure,
+  interfaces, behaviour, failure modes, budgets and properties. It doesn't hold drafts or
+  their links, or project settings: the glossary, units, ID prefixes, scope, viewpoints, saved
+  views or diagram layout. A rollback leaves those as they are.
 - **Create baseline** is enabled once nothing blocks it. Its button names the blockers until then.
   The dialog also lists what doesn't block but is worth knowing (failing or incomplete budgets,
   failing assertions, unhandled pairs, open failure responses, unallocated requirements), and

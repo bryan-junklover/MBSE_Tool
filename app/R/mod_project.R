@@ -18,6 +18,7 @@ mod_project_ui <- function(id) {
             shiny::tags$section(class = "mb-panel",
                                 shiny::tags$b("Project"),
                                 shiny::uiOutput(ns("project_picker")),
+                                shiny::uiOutput(ns("project_admin")),
                                 shiny::tags$div(class = "mb-fields",
                                                 shiny::textInput(ns("new_name"), "New project name"),
                                                 shiny::tags$div(style = "align-self:end", shiny::actionButton(ns("create"), "Create project", class = "mb-btn")))),
@@ -68,6 +69,34 @@ mod_project_ui <- function(id) {
                                                 shiny::selectInput(ns("b_requirement"), "From requirement", choices = c("None" = ""), width = "auto", selectize = FALSE),
                                                 shiny::tags$div(style = "align-self:end", shiny::actionButton(ns("b_add"), "Add budget", class = "mb-btn")))),
             shiny::tags$section(class = "mb-panel",
+                                shiny::tags$b("Analysis limits"),
+                                shiny::tags$span(class = "mb-caption", "A limit on a calculated result, such as endurance, over part of the system."),
+                                shiny::uiOutput(ns("limits")),
+                                shiny::tags$div(class = "mb-fields",
+                                                shiny::selectInput(ns("al_analysis"), "Analysis", choices = character(0), width = "auto", selectize = FALSE),
+                                                shiny::selectInput(ns("al_scope"), "Over", choices = character(0), width = "auto", selectize = FALSE),
+                                                shiny::selectInput(ns("al_comparison"), "Must be", choices = c("At least" = "min", "At most" = "max"), width = "auto", selectize = FALSE),
+                                                shiny::textInput(ns("al_limit"), "Limit", width = "120px"),
+                                                shiny::tags$div(style = "align-self:end", shiny::actionButton(ns("al_add"), "Add limit", class = "mb-btn")))),
+            shiny::tags$section(class = "mb-panel",
+                                shiny::tags$b("Saved views"),
+                                shiny::tags$span(class = "mb-caption", "Filtered Structure views, offered under Saved view on Structure."),
+                                shiny::uiOutput(ns("views")),
+                                shiny::tags$div(class = "mb-fields",
+                                                shiny::textInput(ns("sv_name"), "Name", width = "160px"),
+                                                shiny::checkboxGroupInput(ns("sv_domains"), "Domains",
+                                                                          c("Hardware" = "hw", "Software" = "sw", "Hardware and software" = "hw_sw", "Other" = "other"), inline = TRUE),
+                                                shiny::selectInput(ns("sv_stereotype"), "Stereotype", choices = c("Any" = ""), width = "auto", selectize = FALSE),
+                                                shiny::tags$div(style = "align-self:end", shiny::actionButton(ns("sv_add"), "Add view", class = "mb-btn")))),
+            shiny::tags$section(class = "mb-panel",
+                                shiny::tags$b("Stereotypes"),
+                                shiny::tags$span(class = "mb-caption", "Labels for kinds of component, shown on the diagram and used by saved views."),
+                                shiny::uiOutput(ns("stereotypes")),
+                                shiny::tags$div(class = "mb-fields",
+                                                shiny::textInput(ns("st_name"), "Name", width = "160px"),
+                                                shiny::textInput(ns("st_description"), "Description"),
+                                                shiny::tags$div(style = "align-self:end", shiny::actionButton(ns("st_add"), "Add stereotype", class = "mb-btn")))),
+            shiny::tags$section(class = "mb-panel",
                                 shiny::tags$b("Units"),
                                 shiny::tags$span(class = "mb-caption",
                                                  "Every project has the standard units. Add your own here; a quantity already listed keeps its SI unit, so values convert."),
@@ -117,6 +146,55 @@ mod_project_server <- function(id, state, workspace_dir) {
       if (identical(normalizePath(target, mustWork = FALSE), normalizePath(DBI::dbGetInfo(con())$dbname, mustWork = FALSE))) return()
       switch_project(state, target)
     }, ignoreInit = TRUE)
+    output$project_admin <- shiny::renderUI({
+      refresh_projects()
+      db_dep(state, "settings")
+      current <- basename(DBI::dbGetInfo(con())$dbname)
+      others <- setdiff(list_projects(workspace_dir), current)
+      shiny::tags$div(class = "mb-fields",
+                      shiny::textInput(ns("project_name"), "Name of this project", get_setting(con(), "project_name", "")),
+                      shiny::tags$div(style = "align-self:end", shiny::actionButton(ns("copy_project"), "Copy as new project…", class = "mb-btn")),
+                      if (length(others) > 0L) {
+                        shiny::tags$div(style = "align-self:end",
+                                        select_tag(stats::setNames(others, others), "", change_js(ns("delete_project_pick"), list()), "Delete another project…",
+                                                   label = "Delete another project"))
+                      })
+    })
+    name_debounced <- shiny::debounce(shiny::reactive(input$project_name), 600)
+    shiny::observeEvent(name_debounced(), {
+      name <- trimws(name_debounced())
+      if (nzchar(name) && !identical(name, get_setting(con(), "project_name", ""))) {
+        set_setting(con(), "project_name", name)
+        invalidate_db(state, "settings")
+      }
+    }, ignoreInit = TRUE)
+    shiny::observeEvent(input$copy_project, {
+      shiny::showModal(shiny::modalDialog(title = "Copy as a new project",
+                                          shiny::textInput(ns("copy_name"), "New project name", paste(get_setting(con(), "project_name", "Project"), "copy")),
+                                          shiny::tags$p(class = "mb-caption", "The copy has everything: history, baselines and settings. It opens straight away."),
+                                          footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("copy_confirm"), "Copy", class = "mb-btn mb-btn-primary"))))
+    })
+    shiny::observeEvent(input$copy_confirm, {
+      path <- guarded_edit(copy_project(workspace_dir, con(), input$copy_name))
+      if (is.null(path)) return()
+      shiny::removeModal()
+      switch_project(state, path)
+      refresh_projects(refresh_projects() + 1L)
+    })
+    pending_delete <- shiny::reactiveVal(NULL)
+    shiny::observeEvent(input$delete_project_pick, {
+      if (!nzchar(input$delete_project_pick$value)) return()
+      pending_delete(input$delete_project_pick$value)
+      shiny::showModal(shiny::modalDialog(title = sprintf("Delete %s?", input$delete_project_pick$value),
+                                          shiny::tags$p("The project's file goes for good, with its history and baselines. This can't be undone."),
+                                          footer = shiny::tagList(shiny::modalButton("Cancel"),
+                                                                  shiny::actionButton(ns("delete_project_confirm"), "Delete project for good", class = "mb-btn mb-btn-primary"))))
+    })
+    shiny::observeEvent(input$delete_project_confirm, {
+      done <- guarded_edit(delete_project(workspace_dir, pending_delete(), DBI::dbGetInfo(con())$dbname))
+      shiny::removeModal()
+      if (!is.null(done)) refresh_projects(refresh_projects() + 1L)
+    })
     shiny::observeEvent(input$create, {
       opened <- guarded_edit(create_project(workspace_dir, input$new_name))
       if (is.null(opened)) return()
@@ -244,6 +322,71 @@ mod_project_server <- function(id, state, workspace_dir) {
       same <- if (is.null(def) || nrow(def) == 0L || is.na(def$unit)) character(0) else units$symbol[units$quantity == units$quantity[units$symbol == def$unit]]
       shiny::updateSelectInput(session, "b_unit", choices = same, selected = if (!is.null(def) && nrow(def) == 1L) def$unit)
     })
+    output$limits <- shiny::renderUI({
+      db_dep(state, "model")
+      rows <- analysis_status(con())
+      if (nrow(rows) == 0L) return(shiny::tags$span(class = "mb-caption", "No analysis limits yet."))
+      names <- DBI::dbGetQuery(con(), "SELECT id, name FROM element")
+      simple_table(c("Analysis", "Over", "Now / limit", ""), lapply(seq_len(nrow(rows)), function(i) {
+        list(term_to_title(rows$analysis[i]), names$name[match(rows$scope[i], names$id)],
+             shiny::tags$span(class = paste("mono", if (!rows$pass[i]) "mb-gap"), sprintf("%s%s", rows$text[i], if (rows$pass[i]) "" else " · FAIL")),
+             shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", `aria-label` = paste("Remove the", rows$analysis[i], "limit"),
+                                onclick = event_js(ns("al_delete"), paste(rows$analysis[i], rows$scope[i], sep = "|")), "Remove"))
+      }))
+    })
+    shiny::observe({
+      db_dep(state, "model")
+      shiny::updateSelectInput(session, "al_analysis", choices = stats::setNames(registered_analyses(), term_to_title(registered_analyses())))
+      components <- DBI::dbGetQuery(con(), "SELECT id, name FROM element WHERE kind = 'component' ORDER BY parent_id IS NOT NULL, sort_order, name")
+      shiny::updateSelectInput(session, "al_scope", choices = stats::setNames(components$id, components$name))
+      stereo <- stereotype_list(con())
+      shiny::updateSelectInput(session, "sv_stereotype", choices = c("Any" = "", stats::setNames(stereo$id, stereo$name)))
+    })
+    shiny::observeEvent(input$al_add, {
+      if (!is.null(model_edit(state, add_analysis_limit(con(), input$al_analysis, input$al_scope, input$al_limit, input$al_comparison), "add analysis limit"))) {
+        shiny::updateTextInput(session, "al_limit", value = "")
+      }
+    })
+    shiny::observeEvent(input$al_delete, model_edit(state, delete_entity(con(), "analysis_limit", input$al_delete), "remove analysis limit"))
+    output$views <- shiny::renderUI({
+      db_dep(state, "settings")
+      rows <- saved_views(con())
+      simple_table(c("View", "Shows", ""), lapply(seq_len(nrow(rows)), function(i) {
+        filter <- if (is.na(rows$filter_json[i])) list() else jsonlite::fromJSON(rows$filter_json[i])
+        shows <- paste(c(if (!is.null(filter$domains)) paste("domain", paste(filter$domains, collapse = " or ")),
+                         if (!is.null(filter$stereotypes)) paste("stereotype", paste(filter$stereotypes, collapse = " or ")),
+                         if (!is.null(filter$property)) sprintf("%s %s %s", filter$property$name, filter$property$op, filter$property$value)), collapse = ", ")
+        list(rows$name[i], if (nzchar(shows)) shows else "all components",
+             if (rows$is_builtin[i] == 0L) shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", `aria-label` = paste("Delete view", rows$name[i]),
+                                                             onclick = event_js(ns("sv_delete"), rows$id[i]), "Delete") else "built in")
+      }))
+    })
+    shiny::observeEvent(input$sv_add, {
+      added <- guarded_edit(add_saved_view(con(), input$sv_name, if (is.null(input$sv_domains)) character(0) else input$sv_domains, input$sv_stereotype))
+      if (is.null(added)) return()
+      invalidate_db(state, c("settings", "model"))
+      shiny::updateTextInput(session, "sv_name", value = "")
+    })
+    shiny::observeEvent(input$sv_delete, {
+      if (!is.null(guarded_edit(delete_saved_view(con(), input$sv_delete)))) invalidate_db(state, c("settings", "model"))
+    })
+    output$stereotypes <- shiny::renderUI({
+      db_dep(state, "model")
+      rows <- stereotype_list(con())
+      if (nrow(rows) == 0L) return(shiny::tags$span(class = "mb-caption", "No stereotypes yet."))
+      simple_table(c("Stereotype", "Description", "Used by", ""), lapply(seq_len(nrow(rows)), function(i) {
+        list(rows$name[i], if (is.na(rows$description[i])) "" else rows$description[i], sprintf("%d component%s", rows$used[i], if (rows$used[i] == 1L) "" else "s"),
+             if (rows$used[i] == 0L) shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", `aria-label` = paste("Delete", rows$name[i]),
+                                                       onclick = event_js(ns("st_delete"), rows$id[i]), "Delete"))
+      }))
+    })
+    shiny::observeEvent(input$st_add, {
+      if (!is.null(model_edit(state, add_stereotype(con(), input$st_name, input$st_description), "add stereotype"))) {
+        shiny::updateTextInput(session, "st_name", value = "")
+        shiny::updateTextInput(session, "st_description", value = "")
+      }
+    })
+    shiny::observeEvent(input$st_delete, model_edit(state, delete_stereotype(con(), input$st_delete), "delete stereotype"))
     shiny::observeEvent(input$p_change, model_edit(state, update_property_def(con(), input$p_change$id, input$p_change$field, input$p_change$value), "edit property"))
     shiny::observeEvent(input$p_delete, model_edit(state, delete_property_def(con(), input$p_delete), "delete property"))
     shiny::observeEvent(input$p_add, {

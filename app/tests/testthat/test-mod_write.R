@@ -189,3 +189,14 @@ test_that("switching project clears the open draft, so it can't be committed int
     expect_null(session$getReturned()$editing())
   })
 })
+
+test_that("text that isn't saved isn't replaced without asking", {
+  state <- local_sample_state()
+  shiny::testServer(mod_write_server, args = list(state = state), {
+    session$setInputs(text = "The camera shall take a photo every 2 s.")
+    session$setInputs(open = "SYS-002")
+    expect_null(session$getReturned()$editing())
+    session$setInputs(replace_confirm = 1)
+    expect_identical(session$getReturned()$editing(), "SYS-002")
+  })
+})

@@ -1,6 +1,29 @@
 # Setting up a new project from the app: units, property definitions, budgets and state
 # machines. Before these, a project could only get them from the sample's SQL.
 
+stereotype_list <- function(con) {
+  DBI::dbGetQuery(con, "SELECT s.id, s.name, s.description, (SELECT count(*) FROM element e WHERE e.stereotype_id = s.id) AS used
+                          FROM stereotype s WHERE s.applies_to = 'component' ORDER BY s.name")
+}
+
+# A stereotype for components, such as HW, SW or Avionics.
+add_stereotype <- function(con, name, description = NULL, author = "engineer") {
+  name <- trimws(name)
+  if (!nzchar(name)) refuse("A stereotype needs a name, such as Avionics.")
+  if (tolower(name) %in% tolower(stereotype_list(con)$name)) refuse("There's already a stereotype called ", name, ".")
+  write_stereotype(con, fields = list(name = name, applies_to = "component",
+                                      description = if (is.null(description) || !nzchar(trimws(description))) NA_character_ else trimws(description)),
+                   author = author, note = "Added in Project settings")
+}
+
+delete_stereotype <- function(con, stereotype_id, author = "engineer") {
+  row <- stereotype_list(con)
+  row <- row[row$id == stereotype_id, , drop = FALSE]
+  if (nrow(row) == 0L) refuse("That stereotype no longer exists.")
+  if (row$used > 0L) refuse(row$name, " is used by ", row$used, " component", if (row$used == 1L) "" else "s", ". Change them first.")
+  delete_entity(con, "stereotype", stereotype_id, author)
+}
+
 unit_list <- function(con) DBI::dbGetQuery(con, "SELECT symbol, quantity, si_symbol, si_factor, si_offset FROM unit ORDER BY quantity, si_factor, symbol")
 
 # A unit of your own. A quantity the registry already has keeps its SI unit, so values
@@ -136,4 +159,45 @@ create_state_machine <- function(con, name, owner_element_id, first_state = "Idl
     write_state_machine(con, machine$id, list(initial_state_id = state$id), author, change_set = change_set)
     list(change_set = change_set, id = machine$id, area = "behavior")
   })
+}
+
+# --- Saved views (review B12) ---
+
+saved_views <- function(con) DBI::dbGetQuery(con, "SELECT id, name, filter_json, is_builtin FROM view_def WHERE view_kind = 'structure' ORDER BY is_builtin DESC, name")
+
+# A Structure view of your own: components in some domains, with a stereotype, or both.
+add_saved_view <- function(con, name, domains = character(0), stereotype = NULL) {
+  name <- trimws(name)
+  if (!nzchar(name)) refuse("A view needs a name.")
+  if (name %in% saved_views(con)$name) refuse("There's already a view called ", name, ".")
+  domains <- intersect(domains, c("hw", "sw", "hw_sw", "other"))
+  stereo <- if (is.null(stereotype) || !nzchar(stereotype)) NULL else DBI::dbGetQuery(con, "SELECT name FROM stereotype WHERE id = ?", params = list(stereotype))$name
+  if (length(domains) == 0L && length(stereo) == 0L) refuse("Choose a domain or a stereotype for the view to show.")
+  filter <- c(list(kinds = list("component")), if (length(domains) > 0L) list(domains = as.list(domains)), if (length(stereo) == 1L) list(stereotypes = list(stereo)))
+  id <- allocate_id(con, "VW")
+  write_plain(con, "view_def", list(id = id, name = name, view_kind = "structure", filter_json = canonical_json(filter), is_builtin = 0L))
+  id
+}
+
+delete_saved_view <- function(con, view_id) {
+  view <- DBI::dbGetQuery(con, "SELECT is_builtin FROM view_def WHERE id = ?", params = list(view_id))
+  if (nrow(view) == 0L) refuse("That view no longer exists.")
+  if (view$is_builtin == 1L) refuse("Built-in views can't be deleted.")
+  delete_plain(con, "view_def", "id", view_id)
+}
+
+# --- Analysis limits (review B15) ---
+
+# A limit on a registered analysis over part of the system, in the analysis's own unit.
+add_analysis_limit <- function(con, analysis, scope_id, limit, comparison = "min", requirement_id = NULL, author = "engineer") {
+  if (!analysis %in% registered_analyses()) refuse("There's no analysis called ", analysis, ".")
+  if (nrow(DBI::dbGetQuery(con, "SELECT 1 FROM element WHERE id = ? AND kind = 'component'", params = list(scope_id))) == 0L) refuse("Choose the component it covers.")
+  value <- suppressWarnings(as.numeric(limit))
+  if (is.na(value)) refuse("The limit has to be a number.")
+  if (!comparison %in% c("max", "min")) refuse("A limit is a most or a least.")
+  if (!is.null(read_entity(con, "analysis_limit", paste(analysis, scope_id, sep = "|")))) refuse("That analysis already has a limit there.")
+  write_analysis_limit(con, paste(analysis, scope_id, sep = "|"),
+                       list(limit_value = value, unit = get_analysis(analysis)$unit, comparison = comparison,
+                            requirement_id = if (is.null(requirement_id) || !nzchar(requirement_id)) NA_character_ else requirement_id),
+                       author, "Added in Project settings")
 }

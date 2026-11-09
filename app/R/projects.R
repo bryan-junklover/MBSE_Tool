@@ -16,6 +16,33 @@ open_default_project <- function(dir) {
   init_project_db(file.path(dir, files[which.max(times)]))
 }
 
+project_stem <- function(name) {
+  stem <- gsub("^_+|_+$", "", gsub("[^a-z0-9]+", "_", tolower(trimws(name))))
+  if (!nzchar(stem)) stop("A project needs a name with letters or digits in it.", call. = FALSE)
+  stem
+}
+
+# A copy of the open project under a new name, made through SQLite's backup so a project
+# in use copies cleanly. The copy keeps its history and baselines.
+copy_project <- function(dir, con, name) {
+  path <- file.path(dir, paste0(project_stem(name), ".sqlite"))
+  if (file.exists(path)) stop("There is already a project called ", project_stem(name), ".", call. = FALSE)
+  copy <- DBI::dbConnect(RSQLite::SQLite(), path)
+  on.exit(DBI::dbDisconnect(copy))
+  RSQLite::sqliteCopyDatabase(con, copy)
+  set_setting(copy, "project_name", trimws(name))
+  path
+}
+
+# Deletes a project's file for good. The open project can't be deleted.
+delete_project <- function(dir, file, open_path) {
+  path <- file.path(dir, file)
+  if (!file.exists(path)) stop("That project no longer exists.", call. = FALSE)
+  if (identical(normalizePath(path), normalizePath(open_path))) stop("Switch to another project before deleting this one.", call. = FALSE)
+  unlink(paste0(path, c("", "-wal", "-shm")))
+  invisible(file)
+}
+
 create_project <- function(dir, name) {
   name <- trimws(name)
   stem <- gsub("[^a-z0-9]+", "_", tolower(name))

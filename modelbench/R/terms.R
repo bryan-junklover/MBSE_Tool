@@ -58,7 +58,9 @@ model_terms <- function(con) {
   not_model <- DBI::dbGetQuery(con, "
     SELECT term, NULL AS element_id, NULL AS element_name, NULL AS stereotype, 'not_model' AS source
       FROM glossary WHERE element_id IS NULL")
-  # A property several elements hold (mass, power) doesn't say which element is meant.
+  # A property several elements hold (mass, power) doesn't say which element is meant, so
+  # it stays unresolved. That keeps a more specific phrase ("gimbal mass") free to be added
+  # as a term of its own (review F7, kept by design).
   properties <- properties[!properties$term %in% properties$term[duplicated(properties$term)], , drop = FALSE]
   terms <- rbind(elements, aliases, properties, fields, not_model)
   terms$norm <- normalize_term(terms$term)

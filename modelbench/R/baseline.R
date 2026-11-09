@@ -96,6 +96,29 @@ entity_title <- function(con, kind, id, data) {
       sprintf("%s · %s", if (length(owner) == 1L) owner else data$owner_id, if (length(label) == 1L) label else id)
     },
     requirement = if (is.null(data$short_title)) id else sprintf("%s · %s", id, data$short_title),
+    failure_mode = sprintf("%s · %s %s", id, failure_subject_label(con, data$subject_kind, data$subject_id, if (is.null(data$field_name)) NA_character_ else data$field_name),
+                           tolower(FAILURE_CAUSES[[data$cause_kind]])),
+    link = {
+      name_of <- function(kind, ref) {
+        name <- tryCatch(read_entity(con, kind, ref)$name, error = function(e) NULL)
+        if (is.null(name) || is.na(name)) ref else name
+      }
+      sprintf("%s %s %s", name_of(data$source_kind, data$source_id), gsub("_", " ", data$link_type), name_of(data$target_kind, data$target_id))
+    },
+    budget = {
+      label <- DBI::dbGetQuery(con, "SELECT label FROM property_def WHERE id = ?", params = list(data$property_def_id))$label
+      scope <- DBI::dbGetQuery(con, "SELECT name FROM element WHERE id = ?", params = list(data$scope_element_id))$name
+      sprintf("%s budget over %s", if (length(label) == 1L) label else data$property_def_id, if (length(scope) == 1L) scope else data$scope_element_id)
+    },
+    sm_transition = {
+      state_name <- function(ref) {
+        row <- DBI::dbGetQuery(con, "SELECT name FROM sm_state WHERE id = ?", params = list(ref))
+        if (nrow(row) == 1L) row$name else ref
+      }
+      event <- DBI::dbGetQuery(con, "SELECT name FROM sm_event WHERE id = ?", params = list(data$event_id))$name
+      sprintf("%s → %s → %s", state_name(data$from_state_id), if (length(event) == 1L) event else data$event_id, state_name(data$to_state_id))
+    },
+    failure_waiver = sprintf("Set aside: %s", FAILURE_RULES[[strsplit(id, "|", fixed = TRUE)[[1]][1]]]),
     interface_field = {
       interface <- DBI::dbGetQuery(con, "SELECT name FROM interface WHERE id = ?", params = list(data$interface_id))$name
       sprintf("%s · %s", if (length(interface) == 1L) interface else data$interface_id, data$name)
@@ -169,6 +192,10 @@ compare_baselines <- function(con, a, b = "working") {
   sets <- unique(vapply(entities, function(e) e$change_set, ""))
   lapply(sets, function(set) {
     members <- Filter(function(e) identical(e$change_set, set), entities)
+    # Lead with what the user acted on: a component over the links and ports that went with it.
+    lead <- c("element", "requirement", "interface", "scenario", "state_machine", "failure_mode", "budget", "property_def", "test_case")
+    rank <- match(vapply(members, function(e) e$kind, ""), lead)
+    members <- members[order(ifelse(is.na(rank), length(lead) + 1L, rank))]
     first <- members[[1]]
     list(change_set = set, title = first$title, kind = first$kind, status = first$status, change_text = first$change_text, note = first$note,
          changed_by = first$changed_by, changed_at = first$changed_at, entities = members)
@@ -210,8 +237,24 @@ rollback_to_baseline <- function(con, baseline_id, author = "engineer") {
     # as a component moved under a parent added since the baseline.
     additions <- Filter(function(e) e$status == "added", entities)
     additions <- additions[order(-restore_order(vapply(additions, function(e) e$kind, "")))]
+    taken_at <- DBI::dbGetQuery(con, "SELECT created_at FROM baseline WHERE id = ?", params = list(baseline_id))$created_at
     for (entity in additions) {
-      if (!is.null(read_entity(con, entity$kind, entity$id))) delete_entity(con, entity$kind, entity$id, author, note, change_set)
+      if (is.null(read_entity(con, entity$kind, entity$id))) next
+      # Drafts aren't baselined, so one committed since looks added. Put it back to the
+      # draft it was then (review D5).
+      if (entity$kind == "requirement") {
+        # It isn't in the baseline, so it wasn't committed then: its latest draft revision
+        # from no later than the baseline is what it was.
+        then <- DBI::dbGetQuery(con, "SELECT data_json FROM revision WHERE entity_kind = 'requirement' AND entity_id = ? AND changed_at <= ?
+                                         AND deleted = 0 AND json_extract(data_json, '$.status') = 'draft'
+                                       ORDER BY rev DESC LIMIT 1", params = list(entity$id, taken_at))
+        if (nrow(then) == 1L) {
+          data <- jsonlite::fromJSON(then$data_json, simplifyVector = FALSE)
+          write_entity(con, "requirement", entity$id, restorable_fields("requirement", data), author, note, change_set)
+          next
+        }
+      }
+      delete_entity(con, entity$kind, entity$id, author, note, change_set)
     }
     list(safety = safety, change_set = change_set, area = "baseline", changed = length(entities))
   })

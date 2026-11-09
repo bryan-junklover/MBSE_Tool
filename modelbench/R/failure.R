@@ -238,6 +238,32 @@ failure_findings <- function(con) {
                                        sprintf("%s.%s has a range, but nothing records what happens when a value falls outside it.", row$interface, row$name),
                                        suggest_subject = paste0("interface|", row$interface_id), suggest_cause = "out_of_range", suggest_field = row$name)
   }
+  # A failure detected by a state machine event that no transition takes: the system notices,
+  # but nothing responds (review C11).
+  detected <- links[links$link_type == "detected_by" & links$target_kind == "sm_event", , drop = FALSE]
+  for (i in seq_len(nrow(detected))) {
+    taken <- DBI::dbGetQuery(con, "SELECT 1 FROM sm_transition WHERE event_id = ? LIMIT 1", params = list(detected$target_id[i]))
+    if (nrow(taken) > 0L) next
+    event <- DBI::dbGetQuery(con, "SELECT e.name, m.name AS machine FROM sm_event e JOIN state_machine m ON m.id = e.sm_id WHERE e.id = ?", params = list(detected$target_id[i]))
+    out[[length(out) + 1L]] <- finding("handled_unlinked", "failure_mode", detected$source_id[i],
+                                       sprintf("%s is detected by %s in %s, but no transition responds to that event.", detected$source_id[i], event$name, event$machine),
+                                       detected$source_id[i])
+  }
+  # A failure detected by one event but handled by a transition on another: the response
+  # isn't to what was detected (review C11).
+  for (fm in unique(detected$source_id)) {
+    events <- detected$target_id[detected$source_id == fm]
+    handlers <- links$target_id[links$source_id == fm & links$link_type == "handled_by" & links$target_kind == "sm_transition"]
+    for (t in handlers) {
+      transition <- DBI::dbGetQuery(con, "SELECT t.event_id, e.name FROM sm_transition t JOIN sm_event e ON e.id = t.event_id WHERE t.id = ?", params = list(t))
+      if (nrow(transition) == 1L && !transition$event_id %in% events) {
+        names <- DBI::dbGetQuery(con, sprintf("SELECT name FROM sm_event WHERE id IN (%s)", paste(DBI::dbQuoteString(con, events), collapse = ", ")))$name
+        out[[length(out) + 1L]] <- finding("handled_unlinked", "failure_mode", fm,
+                                           sprintf("%s is detected by %s but handled by a transition on %s, so the response isn't to what was detected.",
+                                                   fm, paste(names, collapse = " or "), transition$name), fm)
+      }
+    }
+  }
   # 6: handled by a requirement whose verification doesn't hold: nothing linked, nothing
   # passing yet, or something failing.
   handled_reqs <- links[links$link_type == "handled_by" & links$target_kind == "requirement", , drop = FALSE]

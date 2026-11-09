@@ -45,7 +45,7 @@ test_that("import sends passing rows to drafts and works the queue one at a time
   state <- local_sample_state()
   file <- withr::local_tempfile(fileext = ".txt")
   writeLines(c("When the bus drops, the power system shall report status within 5 s.",
-               "The system should be reliable.", "The trap shall be safe."), file)
+               "The drone should be quick.", "The trap shall be safe."), file)
   shiny::testServer(mod_spec_server, args = list(state = state), {
     session$setInputs(import = list(name = "reqs.txt", datapath = file))
     session$flushReact()

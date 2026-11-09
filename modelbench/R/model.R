@@ -153,6 +153,16 @@ set_property_value <- function(con, value_id, value, author = "engineer") {
 }
 
 # A human adds a property with no value yet: a placeholder, shown as [value].
+# A property on a connector, such as the voltage or power it carries: Flows shows it.
+add_property_to_connector <- function(con, connector_id, property_def_id, author = "engineer") {
+  def <- read_entity(con, "property_def", property_def_id)
+  if (is.null(def)) refuse("That property no longer exists.")
+  held <- DBI::dbGetQuery(con, "SELECT 1 FROM property_value WHERE owner_kind = 'connector' AND owner_id = ? AND property_def_id = ?", params = list(connector_id, property_def_id))
+  if (nrow(held) > 0L) refuse("This connector already has ", def$label, ".")
+  write_property_value(con, fields = list(owner_kind = "connector", owner_id = connector_id, property_def_id = property_def_id,
+                                          value_state = "placeholder", unit = def$unit), author = author)
+}
+
 add_property_to_element <- function(con, element_id, property_def_id, author = "engineer") {
   def <- read_entity(con, "property_def", property_def_id)
   write_property_value(con, fields = list(owner_kind = "element", owner_id = element_id, property_def_id = property_def_id,
@@ -202,6 +212,7 @@ filter_elements <- function(con, nodes, filter_json) {
   keep <- rep(TRUE, nrow(nodes))
   if (!is.null(filter$kinds)) keep <- keep & nodes$kind %in% filter$kinds
   if (!is.null(filter$stereotypes)) keep <- keep & nodes$stereotype %in% filter$stereotypes
+  if (!is.null(filter$domains)) keep <- keep & nodes$domain %in% filter$domains
   if (!is.null(filter$property)) {
     held <- DBI::dbGetQuery(con, "SELECT v.owner_id, v.num_value FROM property_value v JOIN property_def d ON d.id = v.property_def_id
                                    WHERE v.owner_kind = 'element' AND d.name = ? AND v.value_state = 'set'",
@@ -225,7 +236,7 @@ structure_view <- function(con, view_id = "VW-all", root = default_structure_roo
   view <- DBI::dbGetQuery(con, "SELECT * FROM view_def WHERE id = ?", params = list(view_id))
   filter_json <- if (nrow(view) == 1L) view$filter_json else NA_character_
   all <- DBI::dbGetQuery(con, "
-    SELECT e.id, e.name, e.kind, e.parent_id, e.multiplicity, e.review_state, e.origin, s.name AS stereotype
+    SELECT e.id, e.name, e.kind, e.parent_id, e.multiplicity, e.review_state, e.origin, e.domain, s.name AS stereotype
       FROM element e LEFT JOIN stereotype s ON s.id = e.stereotype_id")
   children <- all[if (is.na(root)) is.na(all$parent_id) else all$parent_id %in% root, , drop = FALSE]
   children <- children[children$kind != "function", , drop = FALSE]

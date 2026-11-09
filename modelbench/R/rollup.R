@@ -77,7 +77,9 @@ budget_status <- function(con) {
     value <- if (known) unit_conversion(con, result$value, result$unit, budget$unit) else NA_real_
     pass <- !known || meets_limit(value, budget$limit_value, budget$comparison)
     note <- if (!known) "no values yet" else if (result$excluded_placeholders > 0L) sprintf("excludes %d placeholder", result$excluded_placeholders) else NA_character_
-    scope_name <- DBI::dbGetQuery(con, "SELECT name FROM element WHERE id = ?", params = list(budget$scope_element_id))$name
+    scope <- DBI::dbGetQuery(con, "SELECT name, multiplicity FROM element WHERE id = ?", params = list(budget$scope_element_id))
+    # A budget over a part there are several of counts all of them (review G8).
+    scope_name <- if (scope$multiplicity > 1L) sprintf("%s (all %d)", scope$name, scope$multiplicity) else scope$name
     data.frame(id = budget$id, label = budget$label, scope = budget$scope_element_id, scope_name = scope_name, value = value,
                limit = budget$limit_value, unit = budget$unit, pass = pass, note = note,
                text = if (known) {

@@ -25,6 +25,11 @@ render_scenario_admin <- function(row, lifelines, delete_text, ns) {
                                       "Its messages go with it. Undo brings them back.", confirm = "Remove lifeline", class = "mb-btn mb-btn-small")
                      })))
     },
+    # A scenario can have both diagrams (review G9).
+    if (row$has_sequence == 0L || row$has_activity == 0L) {
+      other <- if (row$has_activity == 0L) "activity" else "sequence"
+      shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", onclick = event_js(ns("add_view"), other), sprintf("Add the %s diagram", other))
+    },
     danger_zone(confirm_button(if (sketch) "Discard sketch…" else "Delete scenario…", ns("delete_scenario"), row$id,
                                sprintf("%s %s?", if (sketch) "Discard" else "Delete", row$name), delete_text,
                                confirm = if (sketch) "Discard sketch" else "Delete scenario"))
@@ -255,7 +260,11 @@ mod_scenarios_server <- function(id, state) {
       if (!is.null(written)) selected_step(NULL)
     })
     shiny::observeEvent(input$set_view, view(input$set_view))
-    shiny::observeEvent(input$review_scenario, behavior_edit(state, review_entity(con(), "scenario", scenario()$id, input$review_scenario$note), "review"))
+    shiny::observeEvent(input$review_scenario, behavior_edit(state, review_scenario_all(con(), scenario()$id, input$review_scenario$note), "review"))
+    shiny::observeEvent(input$add_view, {
+      field <- if (identical(input$add_view, "activity")) "has_activity" else "has_sequence"
+      if (!is.null(behavior_edit(state, write_scenario(con(), scenario()$id, stats::setNames(list(1L), field), note = "Added a view"), "add view"))) view(input$add_view)
+    })
 
     shiny::observeEvent(input$new, {
       shiny::showModal(shiny::modalDialog(
@@ -316,7 +325,7 @@ mod_scenarios_server <- function(id, state) {
     shiny::observeEvent(input$add_note, behavior_edit(state, add_step(con(), scenario()$id, "note"), "add step"))
     shiny::observeEvent(input$add_fragment, behavior_edit(state, add_step(con(), scenario()$id, "fragment"), "add fragment"))
     shiny::observeEvent(input$delete_step, {
-      behavior_edit(state, delete_entity(con(), "seq_step", input$delete_step), "delete step")
+      behavior_edit(state, delete_seq_step(con(), input$delete_step), "delete step")
       selected_step(NULL)
     })
     apply_order <- function(ids) {
@@ -561,7 +570,7 @@ render_machine_definitions <- function(m, interfaces, fields, units, delete_text
   )
 }
 
-render_checks <- function(rows, ns) {
+render_checks <- function(rows, ns, requirements = character(0)) {
   shiny::tags$section(
     class = "mb-inspector",
     shiny::tags$div(class = "mb-head", shiny::tags$b("Requirement checks"), shiny::actionButton(ns("run_all"), "Run and record", class = "mb-btn mb-btn-small mb-push")),
@@ -570,8 +579,12 @@ render_checks <- function(rows, ns) {
       row <- rows[i, ]
       recorded <- if (is.na(row$result)) "Not recorded yet" else if (row$current) sprintf("Recorded %s, this model", toupper(row$result)) else sprintf("Recorded %s on an earlier model", toupper(row$result))
       shiny::tags$div(
-        shiny::tags$div(class = "mono", style = "font-size:12px", paste(c(row$id, if (!is.na(row$requirement_id)) row$requirement_id), collapse = " · ")),
-        shiny::tags$div(row$description),
+        shiny::tags$div(class = "mb-event-row",
+                        shiny::tags$span(class = "mono", style = "font-size:12px", row$id),
+                        select_tag(requirements, if (is.na(row$requirement_id)) "" else row$requirement_id,
+                                   change_js(ns("assertion_change"), list(id = row$id, field = "requirement_id")), "No requirement", label = paste("Requirement", row$id, "verifies"))),
+        shiny::tags$input(type = "text", value = row$description, `aria-label` = paste("What", row$id, "checks"), style = "width:100%",
+                          onchange = change_js(ns("assertion_change"), list(id = row$id, field = "description"))),
         shiny::tags$div(class = if (row$live_result == "pass") "mb-check-pass" else "mb-check-fail", sprintf("%s · %s", toupper(row$live_result), row$live_message)),
         shiny::tags$div(class = "mb-caption", recorded),
         confirm_button("Delete", ns("delete_assertion"), row$id, sprintf("Delete assertion %s?", row$id),
@@ -870,7 +883,14 @@ mod_machines_server <- function(id, state) {
       live_assertions(con(), sm_id())
     })
     runs <- shiny::reactiveVal(0L)
-    output$checks <- shiny::renderUI(render_checks(assertions(), ns))
+    output$checks <- shiny::renderUI({
+      reqs <- DBI::dbGetQuery(con(), "SELECT id, coalesce(short_title, substr(text, 1, 40)) AS title FROM requirement WHERE status = 'committed' ORDER BY id")
+      render_checks(assertions(), ns, stats::setNames(reqs$id, paste(reqs$id, reqs$title)))
+    })
+    shiny::observeEvent(input$assertion_change, {
+      change <- input$assertion_change
+      behavior_edit(state, update_assertion(con(), change$id, change$field, change$value), "edit assertion")
+    })
     shiny::observeEvent(input$run_all, {
       for (id in assertions()$id) guarded_edit(run_assertion(con(), id))
       runs(runs() + 1L)

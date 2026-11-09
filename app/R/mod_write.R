@@ -212,12 +212,17 @@ mod_write_server <- function(id, state, debounce_ms = 50, coach_ms = NULL) {
       dismiss_proposal(con(), id, input$coach_dismiss_reason)
       invalidate_db(state, "ai")
     })
+    # A draft started from an AI sketch keeps the sketch open until it's saved.
+    started_from <- shiny::reactiveVal(NULL)
     shiny::observeEvent(input$gap_draft, {
-      draft_text <- guarded_edit(start_from_sketch(con(), input$gap_draft))
+      proposal <- input$gap_draft
+      draft_text <- guarded_edit(start_from_sketch(con(), proposal))
       if (!is.null(draft_text)) {
-        clear_form()
-        shiny::updateTextAreaInput(session, "text", value = draft_text)
-        invalidate_db(state, "ai")
+        replace_page(function() {
+          clear_form()
+          started_from(proposal)
+          shiny::updateTextAreaInput(session, "text", value = draft_text)
+        })
       }
     })
     shiny::observeEvent(input$gap_dismiss, ask_dismiss(ns, input$gap_dismiss, "gap_dismiss_confirm", "gap_dismiss_reason"))
@@ -304,12 +309,39 @@ mod_write_server <- function(id, state, debounce_ms = 50, coach_ms = NULL) {
     }
     clear_form <- function() {
       editing(NULL)
+      started_from(NULL)
       shiny::updateTextAreaInput(session, "text", value = "")
       shiny::updateSelectInput(session, "type", selected = "")
       shiny::updateSelectInput(session, "verify", selected = "")
       shiny::updateTextInput(session, "title", value = "")
     }
-    shiny::observeEvent(input$open, load_requirement(input$open))
+    # Text on the page that isn't saved anywhere: replacing it asks first (review F4).
+    unsaved <- function() {
+      text <- stringr::str_squish(if (is.null(input$text)) "" else input$text)
+      if (!nzchar(text)) return(FALSE)
+      saved <- if (is.null(editing())) "" else stringr::str_squish(read_entity(con(), "requirement", editing())$text %||% "")
+      !identical(text, saved)
+    }
+    pending_replace <- shiny::reactiveVal(NULL)
+    replace_page <- function(action) {
+      if (!unsaved()) return(action())
+      pending_replace(action)
+      shiny::showModal(shiny::modalDialog(
+        title = "Discard the text on the page?",
+        shiny::tags$p("The draft on the page isn't saved. Save draft keeps it; Discard replaces it."),
+        footer = shiny::tagList(shiny::modalButton("Keep editing"), shiny::actionButton(ns("replace_confirm"), "Discard", class = "mb-btn mb-btn-primary"))
+      ))
+    }
+    shiny::observeEvent(input$replace_confirm, {
+      shiny::removeModal()
+      action <- pending_replace()
+      pending_replace(NULL)
+      if (!is.null(action)) action()
+    })
+    shiny::observeEvent(input$open, {
+      id <- input$open
+      replace_page(function() load_requirement(id))
+    })
     # A draft belongs to its project: switching projects starts a clean page, so a commit
     # can't write this text over the other project's requirement with the same id.
     shiny::observeEvent(con(), {
@@ -317,18 +349,23 @@ mod_write_server <- function(id, state, debounce_ms = 50, coach_ms = NULL) {
       clear_form()
     }, ignoreInit = TRUE)
     shiny::observeEvent(input$new, {
-      last_commit(NULL)
-      clear_form()
+      replace_page(function() {
+        last_commit(NULL)
+        clear_form()
+      })
     })
     shiny::observeEvent(state$open_in_write(), {
       target <- state$open_in_write()
-      if (is.list(target)) {
-        clear_form()
-        shiny::updateTextAreaInput(session, "text", value = target$text)
-      } else {
-        load_requirement(target)
-      }
       state$open_in_write(NULL)
+      replace_page(function() {
+        if (is.list(target)) {
+          clear_form()
+          started_from(target$proposal)
+          shiny::updateTextAreaInput(session, "text", value = target$text)
+        } else {
+          load_requirement(target)
+        }
+      })
     }, ignoreNULL = TRUE)
 
     form_fields <- function() {
@@ -349,6 +386,11 @@ mod_write_server <- function(id, state, debounce_ms = 50, coach_ms = NULL) {
                                                  assessed_text = if (reviewed) held$text, coach_call_id = if (reviewed) held$call_id))
       if (is.null(written)) return()
       push_edit(state, written, sprintf("commit %s", written$id))
+      if (!is.null(started_from())) {
+        keep_started_sketch(con(), started_from(), written$id)
+        started_from(NULL)
+        invalidate_db(state, "ai")
+      }
       if (reviewed) record_conflicts(con(), written$id, held$answer, held$call_id)
       last_commit(written$id)
       invalidate_db(state, written$area)
@@ -363,6 +405,11 @@ mod_write_server <- function(id, state, debounce_ms = 50, coach_ms = NULL) {
       written <- guarded_edit(save_draft(con(), input$save_request$text, editing(), form_fields()))
       if (is.null(written)) return()
       push_edit(state, written, sprintf("save draft %s", written$id))
+      if (!is.null(started_from())) {
+        keep_started_sketch(con(), started_from(), written$id)
+        started_from(NULL)
+        invalidate_db(state, "ai")
+      }
       editing(written$id)
       invalidate_db(state, written$area)
     })
