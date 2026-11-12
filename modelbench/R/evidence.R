@@ -10,8 +10,15 @@ entity_value_text <- function(con, kind, id, rev = NULL) {
   paste0(value, unit)
 }
 
+# A stored entry's content hash. Records made before hashes were kept have only a rev, so
+# the hash is worked out from that revision.
+stored_entry_hash <- function(con, entry) {
+  if (!is.null(entry$h)) return(entry$h)
+  context_content_hash(entry$kind, read_entity_rev(con, entry$kind, entry$id, entry$rev))
+}
+
 # The entries that differ between a record's stored context and the current one.
-context_changes <- function(stored, current) {
+context_changes <- function(stored, current, con = NULL) {
   key <- function(entries) vapply(entries, function(entry) paste(entry$kind, entry$id), "")
   stored_keys <- key(stored)
   current_keys <- key(current)
@@ -20,7 +27,7 @@ context_changes <- function(stored, current) {
     at <- match(stored_keys[i], current_keys)
     if (is.na(at)) {
       changes[[length(changes) + 1L]] <- list(kind = stored[[i]]$kind, id = stored[[i]]$id, change = "removed", was = stored[[i]]$rev, now = NA_integer_)
-    } else if (!identical(as.integer(stored[[i]]$rev), as.integer(current[[at]]$rev))) {
+    } else if (if (is.null(con)) !identical(as.integer(stored[[i]]$rev), as.integer(current[[at]]$rev)) else !identical(stored_entry_hash(con, stored[[i]]), current[[at]]$h)) {
       changes[[length(changes) + 1L]] <- list(kind = stored[[i]]$kind, id = stored[[i]]$id, change = "revised", was = stored[[i]]$rev, now = current[[at]]$rev)
     }
   }
@@ -44,10 +51,14 @@ describe_change <- function(con, change) {
 # One row per record whose context no longer matches, with what changed. Only the
 # latest record for a test case counts: re-recording is how evidence becomes current.
 stale_evidence <- function(con) {
+  # Only test cases still linked to their requirement count: unlinking one retires its
+  # records, which stay as history.
   records <- DBI::dbGetQuery(con, "
     SELECT v.* FROM verification_record v
      WHERE v.rowid = (SELECT max(o.rowid) FROM verification_record o
                        WHERE o.requirement_id = v.requirement_id AND coalesce(o.test_case_id, '') = coalesce(v.test_case_id, ''))
+       AND (v.test_case_id IS NULL OR EXISTS (SELECT 1 FROM link l WHERE l.link_type = 'verified_by' AND l.source_kind = 'requirement'
+                                               AND l.source_id = v.requirement_id AND l.target_kind = 'test_case' AND l.target_id = v.test_case_id))
      ORDER BY v.id")
   empty <- data.frame(id = character(0), requirement_id = character(0), test_case_id = character(0), text = character(0), stringsAsFactors = FALSE)
   rows <- lapply(seq_len(nrow(records)), function(i) {
@@ -55,7 +66,8 @@ stale_evidence <- function(con) {
     current <- verification_context(con, record$requirement_id)
     if (identical(sha256(canonical_json(current)), record$context_hash)) return(NULL)
     stored <- jsonlite::fromJSON(record$context_json, simplifyVector = FALSE)
-    changes <- context_changes(stored, current)
+    changes <- context_changes(stored, current, con)
+    if (length(changes) == 0L) return(NULL)
     data.frame(id = record$id, requirement_id = record$requirement_id, test_case_id = record$test_case_id,
                text = paste(vapply(changes, function(change) describe_change(con, change), ""), collapse = "; "), stringsAsFactors = FALSE)
   })
@@ -68,9 +80,10 @@ requirement_evidence <- function(con, requirement_id) {
     SELECT t.id, t.name, t.method FROM test_case t JOIN link l ON l.target_kind = 'test_case' AND l.target_id = t.id
      WHERE l.link_type = 'verified_by' AND l.source_kind = 'requirement' AND l.source_id = ? ORDER BY t.id", params = list(requirement_id))
   stale <- stale_evidence(con)
-  cases$result <- NA_character_
-  cases$recorded_at <- NA_character_
-  cases$stale <- NA_character_
+  # rep() keeps the columns when there are no cases, which a bare NA can't fill.
+  cases$result <- rep(NA_character_, nrow(cases))
+  cases$recorded_at <- rep(NA_character_, nrow(cases))
+  cases$stale <- rep(NA_character_, nrow(cases))
   for (i in seq_len(nrow(cases))) {
     latest <- DBI::dbGetQuery(con, "SELECT id, result, recorded_at FROM verification_record WHERE requirement_id = ? AND test_case_id = ? ORDER BY rowid DESC LIMIT 1",
                               params = list(requirement_id, cases$id[i]))
@@ -84,6 +97,24 @@ requirement_evidence <- function(con, requirement_id) {
   cases
 }
 
+# A test case's name or method.
+update_test_case <- function(con, test_case_id, field, value, author = "engineer") {
+  if (is.null(read_entity(con, "test_case", test_case_id))) refuse("That test case no longer exists.")
+  value <- trimws(if (is.null(value)) "" else value)
+  if (field == "name" && !nzchar(value)) refuse("A test case needs a name.")
+  if (!field %in% c("name", "method")) refuse("A test case's ", field, " can't be changed here.")
+  write_test_case(con, test_case_id, stats::setNames(list(value), field), author, "Test case edited")
+}
+
+# Stops a test case verifying a requirement. Its recorded results stay as history but no
+# longer count, so stale ones stop blocking a baseline.
+unlink_test_case <- function(con, requirement_id, test_case_id, author = "engineer") {
+  link <- DBI::dbGetQuery(con, "SELECT id FROM link WHERE link_type = 'verified_by' AND source_kind = 'requirement' AND source_id = ?
+                                   AND target_kind = 'test_case' AND target_id = ?", params = list(requirement_id, test_case_id))$id
+  if (length(link) == 0L) refuse(test_case_id, " doesn't verify ", requirement_id, ".")
+  delete_entity(con, "link", link[1], author, "Test case unlinked")
+}
+
 add_test_case <- function(con, requirement_id, name, method, author = "engineer") {
   if (!nzchar(trimws(name))) refuse("A test case needs a name.")
   with_change_set(con, function(change_set) {
@@ -92,4 +123,34 @@ add_test_case <- function(con, requirement_id, name, method, author = "engineer"
                                   target_kind = "test_case", target_id = written$id), author = author, change_set = change_set)
     written
   })
+}
+
+# State machine assertions that verify a requirement, each checked now and with its latest
+# recorded run.
+requirement_assertions <- function(con, requirement_id) {
+  rows <- DBI::dbGetQuery(con, "
+    SELECT a.*, m.name AS machine, r.result AS recorded, r.run_at, r.model_hash
+      FROM link l JOIN sm_assertion a ON a.id = l.target_id JOIN state_machine m ON m.id = a.sm_id
+      LEFT JOIN sm_run r ON r.id = (SELECT max(id) FROM sm_run WHERE assertion_id = a.id)
+     WHERE l.link_type = 'verified_by' AND l.source_kind = 'requirement' AND l.source_id = ? AND l.target_kind = 'sm_assertion'
+     ORDER BY a.id", params = list(requirement_id))
+  rows$live <- rep(NA_character_, nrow(rows))
+  rows$live_message <- rep(NA_character_, nrow(rows))
+  for (i in seq_len(nrow(rows))) {
+    outcome <- run_assertion_check(load_machine(con, rows$sm_id[i]), rows[i, ])
+    rows$live[i] <- outcome$result
+    rows$live_message[i] <- outcome$message
+  }
+  rows
+}
+
+# Whether a requirement's verification holds: at least one check passes, and none fails.
+# A test counts by its latest current result; an assertion by how it runs now.
+requirement_verification <- function(con, requirement_id) {
+  cases <- requirement_evidence(con, requirement_id)
+  checks <- requirement_assertions(con, requirement_id)
+  passing <- sum(cases$result %in% "pass" & is.na(cases$stale)) + sum(checks$live %in% "pass")
+  failing <- sum(cases$result %in% c("fail", "error")) + sum(checks$live %in% c("fail", "error"))
+  list(verified = passing > 0L && failing == 0L, passing = passing, failing = failing,
+       linked = nrow(cases) + nrow(checks))
 }

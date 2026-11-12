@@ -2,11 +2,13 @@
 
 TASK_LABELS <- c(req_light_check = "Requirement light check", req_deep_check = "Requirement deep check", scope_gaps = "Gaps the scope implies",
                  trace_coach = "Trace coach", gap_inference = "Gap inference", allocation_coach = "Allocation coach", impact_narrative = "Change impact narrative",
-                 behavior_sketch = "Behavior sketch", behavior_analysis = "Behavior analysis", stakeholder_summary = "Stakeholder summaries", model_chat = "Model Q&A chat")
+                 behavior_sketch = "Behavior sketch", behavior_analysis = "Behavior analysis", stakeholder_summary = "Stakeholder summaries", model_chat = "Model Q&A chat",
+                 failure_suggest = "Failure suggestions")
 TASK_SENDS <- c(req_light_check = "one requirement, its parent, related requirements", req_deep_check = "one requirement, up to 40 related, the scope", scope_gaps = "scope, model names, committed requirements",
                 trace_coach = "one requirement and numbered candidates", gap_inference = "scope, model names, committed requirements", allocation_coach = "one function and numbered candidates",
                 impact_narrative = "the diff and impact set", behavior_sketch = "a description and model names", behavior_analysis = "a scenario and its interfaces",
-                stakeholder_summary = "view contents", model_chat = "what it asks for through tools")
+                stakeholder_summary = "view contents", model_chat = "what it asks for through tools",
+                failure_suggest = "scope, model names, connections and recorded failures")
 
 POLICY_ROWS <- list(
   c("Requirement wording", "Ask questions; show example rewrites, folded, as word diffs", "Every word committed", "No way to apply a rewrite; the gate re-checks every commit"),
@@ -16,8 +18,20 @@ POLICY_ROWS <- list(
   c("Explanations", "Write freely", "Decisions; numbers come from code", "Numbers come from code, never the model")
 )
 
-mod_ai_settings_ui <- function(id) {
+# `part` is "ai" (providers, routing and policy) or "data" (data protection), each its own tab.
+mod_ai_settings_ui <- function(id, part = c("ai", "data")) {
   ns <- shiny::NS(id)
+  part <- match.arg(part)
+  if (part == "data") {
+    return(shiny::tags$section(class = "mb-panel",
+                               shiny::tags$b("Data protection"),
+                               shiny::checkboxInput(ns("local_only"), "Local only: route every task to the local provider, and block cloud calls", width = "100%"),
+                               shiny::textAreaInput(ns("redact"), "Redact before cloud calls (one term per line)", rows = 3, width = "100%"),
+                               shiny::tags$div(class = "mb-fields",
+                                               shiny::textInput(ns("spend_cap"), "Daily cloud spend cap, in US dollars", placeholder = "no cap"),
+                                               shiny::textInput(ns("coach_wait"), "Coach wait after typing stops, in milliseconds")),
+                               shiny::tags$span(class = "mb-caption", "Every prompt and response is logged to this project. That can't be turned off in this version.")))
+  }
   shiny::tagList(
     shiny::tags$section(class = "mb-panel", shiny::tags$b("AI providers"), shiny::uiOutput(ns("providers"))),
     shiny::tags$section(class = "mb-panel",
@@ -29,14 +43,7 @@ mod_ai_settings_ui <- function(id) {
                           class = "mb-simple",
                           shiny::tags$thead(shiny::tags$tr(lapply(c("Kind", "The AI may", "Always yours", "Enforced by"), shiny::tags$th))),
                           shiny::tags$tbody(lapply(POLICY_ROWS, function(row) shiny::tags$tr(lapply(row, shiny::tags$td))))
-                        ))),
-    shiny::tags$section(class = "mb-panel",
-                        shiny::tags$b("Data protection"),
-                        shiny::checkboxInput(ns("local_only"), "Local only: route every task to the local provider, and block cloud calls"),
-                        shiny::textAreaInput(ns("redact"), "Redact before cloud calls (one term per line)", rows = 2, width = "100%"),
-                        shiny::textInput(ns("spend_cap"), "Daily cloud spend cap, in US dollars", placeholder = "no cap"),
-                        shiny::textInput(ns("coach_wait"), "Coach wait after typing stops, in milliseconds"),
-                        shiny::tags$span(class = "mb-caption", "Every prompt and response is logged to this project. That can't be turned off in this version."))
+                        )))
   )
 }
 
@@ -147,7 +154,7 @@ mod_ai_settings_server <- function(id, state) {
       local <- rows[rows$is_local == 1L, , drop = FALSE]
       loaded <- if (nrow(local) > 0L) local_server_models(local$base_url[1])$models else character(0)
       shiny::tags$div(class = "mb-table", shiny::tags$table(
-        class = "mb-simple",
+        class = "mb-simple mb-routes",
         shiny::tags$thead(shiny::tags$tr(lapply(c("Task", "Runs", "Provider", "Model", "Fallback", "Fallback model", "Sends"), shiny::tags$th))),
         shiny::tags$tbody(lapply(seq_len(nrow(routes)), function(i) {
           route <- routes[i, ]

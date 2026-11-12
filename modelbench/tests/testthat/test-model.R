@@ -131,7 +131,7 @@ test_that("the structure view shows one level, with gaps, sketches and stubs", {
   view <- structure_view(local_sample())
   expect_identical(view$root, "C-000")
   expect_setequal(view$nodes$id, c("C-001", "C-002", "C-003", "C-004", "C-005", "C-006", "C-007", "C-010"))
-  expect_identical(view$nodes$id[view$nodes$gap], "C-007")
+  expect_setequal(view$nodes$id[view$nodes$gap], c("C-007", "C-002"))
   expect_match(view$nodes$gap_note[view$nodes$id == "C-007"], "trigger_in has no connector")
   expect_identical(view$nodes$review_state[view$nodes$id == "C-010"], "unreviewed")
   # The physical connectors at this level; thrust and air reach the hidden environment.

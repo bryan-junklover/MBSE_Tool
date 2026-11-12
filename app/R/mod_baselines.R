@@ -1,18 +1,17 @@
 # Analyze › Baselines & impact (handoff §5.9).
 
-mod_baselines_ui <- function(id) {
+mod_baselines_ui <- function(id, tabs = NULL) {
   ns <- shiny::NS(id)
   shiny::tagList(
-    shiny::tags$div(class = "mb-tabbar",
-                    shiny::selectInput(ns("from"), "Compare", choices = character(0), width = "220px"),
-                    shiny::tags$span(`aria-hidden` = "true", "→"),
-                    shiny::selectInput(ns("to"), "with", choices = c("Working copy" = "working"), width = "220px"),
-                    shiny::tags$div(class = "mb-actions",
-                                    shiny::actionButton(ns("rollback"), "Roll back…", class = "mb-btn"),
-                                    shiny::uiOutput(ns("create_button"), inline = TRUE))),
+    screen_bar(tabs,
+               shiny::selectInput(ns("from"), "Compare", choices = character(0), width = "auto", selectize = FALSE),
+               shiny::tags$span(`aria-hidden` = "true", "→"),
+               shiny::selectInput(ns("to"), "with", choices = c("Working copy" = "working"), width = "auto", selectize = FALSE),
+               actions = shiny::tagList(shiny::actionButton(ns("rollback"), "Roll back…", class = "mb-btn"),
+                                        shiny::uiOutput(ns("create_button"), inline = TRUE))),
     shiny::tags$div(class = "mb-body",
-                    shiny::tags$aside(class = "mb-left", style = "max-width:340px;flex-basis:300px", shiny::uiOutput(ns("cards"))),
-                    shiny::tags$main(class = "mb-main", shiny::uiOutput(ns("impact")), shiny::uiOutput(ns("narrative"))))
+                    side_column("left", "baselines.cards", "Changes", width = 300, shiny::uiOutput(ns("cards"))),
+                    shiny::tags$main(class = "mb-main", shiny::uiOutput(ns("impact"))))
   )
 }
 
@@ -36,23 +35,56 @@ render_change_cards <- function(cards, counts, selected, input_id, baseline_labe
   )
 }
 
+SIGNIFICANCE_ORDER <- c(High = 1L, Medium = 2L, Low = 3L)
+
+# Where a path starts: the changed item it was reached from.
+path_root <- function(paths) vapply(strsplit(paths, " → ", fixed = TRUE), `[`, "", 1L)
+
+# Rows ranked by significance, then hops. Each path loses the changed item it starts from,
+# which heads its group instead; one and two hops are shown, three or more folded (§2.27).
 render_impact_table <- function(items) {
-  shiny::tags$div(class = "mb-table", shiny::tags$table(
-    class = "mb-simple",
-    shiny::tags$thead(shiny::tags$tr(lapply(c("Impacted element", "Path", "Hops", "Significance"), shiny::tags$th))),
-    shiny::tags$tbody(lapply(seq_len(nrow(items)), function(i) {
-      row <- items[i, ]
-      significance <- if ("significance" %in% names(row)) row$significance else NA_character_
-      shiny::tags$tr(
-        shiny::tags$td(row$label, if (!is.na(row$stale)) shiny::tags$div(class = "mb-gap", style = "font-size:12px", sprintf("Evidence no longer current: %s", row$stale))),
-        shiny::tags$td(class = "mono", style = "font-size:12px", row$path),
-        shiny::tags$td(class = "mono", row$hops),
-        shiny::tags$td(class = if (identical(significance, "High")) "mb-sig-high" else if (identical(significance, "Medium")) "mb-sig-medium",
-                       title = if ("reason" %in% names(row) && !is.na(row$reason)) row$reason,
-                       if (is.na(significance)) shiny::tags$span(class = "mb-caption", "not rated") else significance)
-      )
-    }))
-  ))
+  significance <- if ("significance" %in% names(items)) items$significance else rep(NA_character_, nrow(items))
+  rank <- SIGNIFICANCE_ORDER[significance]
+  rank[is.na(rank)] <- 9L
+  items <- items[order(rank, items$hops), , drop = FALSE]
+  roots <- path_root(items$path)
+  # A path that is only its root (the changed item itself) keeps its text.
+  rest <- ifelse(nchar(items$path) > nchar(roots), paste0("→", substring(items$path, nchar(roots) + 3L)), items$path)
+  table <- function(rows) {
+    groups <- unique(roots[rows])
+    shiny::tags$div(class = "mb-table", shiny::tags$table(
+      class = "mb-simple",
+      shiny::tags$thead(shiny::tags$tr(lapply(c("Impacted element", "Path", "Hops", "Significance"), shiny::tags$th))),
+      lapply(groups, function(root) {
+        in_group <- rows[roots[rows] == root]
+        shiny::tags$tbody(
+          shiny::tags$tr(class = "mb-group-row", shiny::tags$td(colspan = 4, shiny::tags$span(class = "mb-caption", "From "), shiny::tags$span(class = "mono", root),
+                                                               shiny::tags$span(class = "mb-caption", sprintf(" · %d", length(in_group))))),
+          lapply(in_group, function(i) {
+            row <- items[i, ]
+            sig <- if ("significance" %in% names(row)) row$significance else NA_character_
+            shiny::tags$tr(
+              shiny::tags$td(row$label, if (!is.na(row$stale)) shiny::tags$div(class = "mb-gap", style = "font-size:12px", sprintf("Evidence no longer current: %s", row$stale))),
+              shiny::tags$td(class = "mono", style = "font-size:12px", title = row$path, rest[i]),
+              shiny::tags$td(class = "mono", row$hops),
+              shiny::tags$td(class = if (identical(sig, "High")) "mb-sig-high" else if (identical(sig, "Medium")) "mb-sig-medium",
+                             title = if ("reason" %in% names(row) && !is.na(row$reason)) row$reason,
+                             if (is.na(sig)) shiny::tags$span(class = "mb-caption", "not rated") else sig)
+            )
+          })
+        )
+      })
+    ))
+  }
+  near <- which(items$hops <= 2L)
+  far <- which(items$hops > 2L)
+  shiny::tagList(
+    if (length(near) > 0L) table(near),
+    if (length(far) > 0L) {
+      shiny::tags$details(class = "mb-fold", open = if (length(near) == 0L) NA,
+                          shiny::tags$summary(sprintf("%d more, three or more hops away", length(far))), table(far))
+    }
+  )
 }
 
 render_narrative <- function(narrative, audience, set_input, source_line) {
@@ -81,6 +113,11 @@ mod_baselines_server <- function(id, state) {
     selected <- shiny::reactiveVal(NULL)
     audience <- shiny::reactiveVal("technical")
     ai_results <- shiny::reactiveVal(list())
+    # AI ratings are keyed by change set, and change-set ids repeat across projects.
+    shiny::observeEvent(con(), {
+      ai_results(list())
+      selected(NULL)
+    }, ignoreInit = TRUE)
     ai_error <- shiny::reactiveVal(NULL)
 
     baselines <- shiny::reactive({
@@ -163,22 +200,19 @@ mod_baselines_server <- function(id, state) {
       card <- current_card()
       if (is.null(data)) return(shiny::tags$p(class = "mb-caption", "There's nothing to compare yet."))
       scenarios <- impacted_scenarios(data$items)
+      # The narrative comes first, then the table it summarises (§2.27).
       shiny::tags$section(
         class = "mb-inspector",
         shiny::tags$div(class = "mb-head", shiny::tags$h1(style = "margin:0;font-size:18px;font-weight:600", sprintf("Impact of %s", card$title)),
-                        shiny::tags$span(class = "mb-caption", "Impact set found by graph traversal (complete) · significance rated by AI")),
-        render_impact_table(data$items),
+                        shiny::tags$span(class = "mb-caption", sprintf("%d elements · found by graph traversal (complete) · significance rated by AI", nrow(data$items)))),
         shiny::tags$div(class = "mb-head",
                         if (nrow(scenarios) > 0L) shiny::tags$button(type = "button", class = "mb-linkish", onclick = event_js(ns("to_behavior"), card$change_set), sprintf("Behavioral impact: %d scenarios affected", nrow(scenarios))),
-                        shiny::actionButton(ns("rate"), "Rate and explain with AI", class = "mb-btn mb-btn-ai"),
+                        shiny::actionButton(ns("rate"), "Rate and explain with AI", class = "mb-btn mb-btn-ai mb-push"),
                         if (task$status() == "running") shiny::tags$span(class = "mb-caption", "Checking…"),
-                        if (!is.null(ai_error())) shiny::tags$span(ai_error()))
+                        if (!is.null(ai_error())) shiny::tags$span(ai_error())),
+        if (!is.null(data$narrative)) render_narrative(data$narrative, audience(), ns("set_audience"), sprintf("via %s", paste(c(data$provider_id, data$model), collapse = " · "))),
+        render_impact_table(data$items)
       )
-    })
-    output$narrative <- shiny::renderUI({
-      data <- impact()
-      if (is.null(data) || is.null(data$narrative)) return(NULL)
-      render_narrative(data$narrative, audience(), ns("set_audience"), sprintf("via %s", paste(c(data$provider_id, data$model), collapse = " · ")))
     })
     shiny::observeEvent(input$set_audience, audience(input$set_audience))
     shiny::observeEvent(input$to_behavior, {
@@ -187,28 +221,42 @@ mod_baselines_server <- function(id, state) {
     })
 
     # --- Create a baseline ---
+    # The button says up front when it can't succeed (§2.28).
     output$create_button <- shiny::renderUI({
       db_dep(state, "baseline")
-      shiny::actionButton(ns("create"), sprintf("Create baseline %s…", next_baseline_id(con())), class = "mb-btn mb-btn-primary")
+      db_dep(state, "model")
+      db_dep(state, "spec")
+      db_dep(state, "behavior")
+      n <- nrow(baseline_blockers(con()))
+      label <- if (n == 0L) sprintf("Create baseline %s…", next_baseline_id(con())) else sprintf("Create baseline %s · %d blocker%s", next_baseline_id(con()), n, if (n == 1L) "" else "s")
+      shiny::actionButton(ns("create"), label, class = if (n == 0L) "mb-btn mb-btn-primary mb-btn-compact" else "mb-btn")
     })
     shiny::observeEvent(input$create, {
       blockers <- baseline_blockers(con())
       ready <- nrow(blockers) == 0L
-      group <- function(key, title) {
-        rows <- blockers[blockers$group == key, , drop = FALSE]
-        if (nrow(rows) == 0L) return(NULL)
-        shiny::tags$div(shiny::tags$b(sprintf("%d %s", nrow(rows), title)), shiny::tags$ul(lapply(rows$text, shiny::tags$li)))
-      }
       shiny::showModal(shiny::modalDialog(
-        title = sprintf("Create baseline %s", next_baseline_id(con())),
+        title = sprintf("Create baseline %s", next_baseline_id(con())), size = "l", easyClose = TRUE,
         if (!ready) {
-          shiny::tagList(shiny::tags$p(class = "mb-gap", sprintf("It can't be created yet: %d blockers.", nrow(blockers))),
-                         group("placeholder", "placeholders"), group("unreviewed", "unreviewed AI drafts"), group("stale", "stale evidence"))
+          shiny::tagList(shiny::tags$p(class = "mb-gap", sprintf("It can't be created yet: %d blockers. Each link goes to where it's fixed.", nrow(blockers))),
+                         render_blocker_groups(model_health(con())$blockers, ns("go")))
+        },
+        if (ready) {
+          warnings <- baseline_warnings(con())
+          if (nrow(warnings) > 0L) {
+            shiny::tags$section(class = "mb-panel",
+                                shiny::tags$b(sprintf("Doesn't block, but worth knowing (%d)", nrow(warnings))),
+                                shiny::tags$ul(lapply(warnings$text, shiny::tags$li)),
+                                shiny::tags$span(class = "mb-caption", "These are written into the baseline's note, as what was known when it was taken."))
+          }
         },
         if (ready) shiny::textInput(ns("baseline_name"), "Name"),
         if (ready) shiny::textAreaInput(ns("baseline_note"), "Note"),
         footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("create_confirm"), "Create baseline", class = "mb-btn mb-btn-primary", disabled = !ready))
       ))
+    })
+    shiny::observeEvent(input$go, {
+      shiny::removeModal()
+      follow_blocker(state, input$go)
     })
     shiny::observeEvent(input$create_confirm, {
       name <- trimws(if (is.null(input$baseline_name)) "" else input$baseline_name)
@@ -226,7 +274,8 @@ mod_baselines_server <- function(id, state) {
       if (is.na(from)) return(refusal_toast("There's no baseline to roll back to."))
       shiny::showModal(shiny::modalDialog(
         title = sprintf("Roll back to %s?", from),
-        shiny::tags$p(sprintf("The model goes back to how it was at %s, as new revisions: history isn't rewritten. Draft requirements stay as they are.", from)),
+        shiny::tags$p(sprintf(paste("The model goes back to how it was at %s, as new revisions: history isn't rewritten.",
+                                    "Draft requirements stay as they are, and one committed since %s goes back to the draft it was."), from, from)),
         shiny::tags$p(sprintf("It first saves the current state as safety baseline %s. Roll back to that to undo this.", next_baseline_id(con()))),
         footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("rollback_confirm"), sprintf("Roll back to %s", from), class = "mb-btn mb-btn-primary"))
       ))

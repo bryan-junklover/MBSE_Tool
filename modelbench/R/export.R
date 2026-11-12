@@ -217,65 +217,85 @@ find_quarto <- function() {
   if (length(found) == 0L) NA_character_ else unname(found[1])
 }
 
-icd_markdown <- function(con) {
-  interfaces <- DBI::dbGetQuery(con, "SELECT * FROM interface WHERE layer = 'physical' ORDER BY flow_type, name")
-  rate <- function(row) if (is.na(row$rate_value)) "" else sprintf("%s %s", format(row$rate_value, trim = TRUE), row$rate_unit)
-  summary <- data.frame(ID = interfaces$id, Name = interfaces$name, Flow = interfaces$flow_type,
-                        Rate = vapply(seq_len(nrow(interfaces)), function(i) rate(interfaces[i, ]), ""), Transport = interfaces$transport, stringsAsFactors = FALSE)
-  connections <- DBI::dbGetQuery(con, "
-    SELECT c.id, sp.interface_id, se.name AS source, sp.name AS source_port, te.name AS target, tp.name AS target_port
+# Every connector, with the elements and ports at each end.
+connection_rows <- function(con) {
+  DBI::dbGetQuery(con, "
+    SELECT c.id, sp.interface_id, se.id AS source_id, se.name AS source, sp.name AS source_port,
+           te.id AS target_id, te.name AS target, tp.name AS target_port
       FROM connector c JOIN port sp ON sp.id = c.source_port_id JOIN port tp ON tp.id = c.target_port_id
       JOIN element se ON se.id = sp.element_id JOIN element te ON te.id = tp.element_id ORDER BY c.id")
-  open_items <- character(0)
-  sections <- vapply(seq_len(nrow(interfaces)), function(i) {
-    row <- interfaces[i, ]
-    fields <- interface_fields(con, row$id)
-    used <- interface_where_used(con, row$id)
-    links <- connections[connections$interface_id == row$id, , drop = FALSE]
-    ranges <- vapply(seq_len(nrow(fields)), function(j) format_field_range(fields$range_state[j], fields$min_value[j], fields$max_value[j]), "")
-    if (any(fields$range_state == "placeholder")) open_items <<- c(open_items, sprintf("%s: range to be decided for %s.", row$name, paste(fields$name[fields$range_state == "placeholder"], collapse = ", ")))
-    if (nrow(links) == 0L) open_items <<- c(open_items, sprintf("%s has no connection yet.", row$name))
-    paste0(
-      sprintf("## %s · %s {#%s}\n\n", row$id, row$name, tolower(row$id)),
-      if (!is.na(row$description)) paste0(row$description, "\n\n"),
-      sprintf("Flow: %s%s%s.\n\n", row$flow_type, if (nzchar(rate(row))) paste0(" · rate ", rate(row)) else "", if (!is.na(row$transport)) paste0(" · over ", row$transport) else ""),
-      if (row$review_state == "unreviewed") "::: {.callout-warning}\nThis interface is an unreviewed AI draft.\n:::\n\n",
-      "### Fields\n\n", md_table(c("Field", "Type", "Unit", "Range", "Notes"), data.frame(fields$name, fields$value_type, fields$unit, ranges, fields$notes)), "\n\n",
-      "### Connections\n\n", md_table(c("Connector", "From", "To"), data.frame(links$id, sprintf("%s.%s", links$source, links$source_port), sprintf("%s.%s", links$target, links$target_port))), "\n\n",
-      "### Used by\n\n",
-      paste0("- ", c(
-        if (nrow(used$ports) > 0L) sprintf("Ports: %s", paste(sprintf("%s.%s (%s)", used$ports$element, used$ports$name, used$ports$direction), collapse = ", ")),
-        if (nrow(used$scenarios) > 0L) sprintf("Scenarios: %s", paste(sprintf("%s %s", used$scenarios$id, used$scenarios$name), collapse = ", ")),
-        if (nrow(used$events) > 0L) sprintf("State machine events: %s", paste(used$events$name, collapse = ", ")),
-        if (nrow(used$requirements) > 0L) sprintf("Requirements: %s", paste(used$requirements$id, collapse = ", "))
-      ), collapse = "\n"), "\n"
-    )
-  }, "")
+}
+
+interface_rate_text <- function(row) if (is.na(row$rate_value)) "" else sprintf("%s %s", format(row$rate_value, trim = TRUE), row$rate_unit)
+
+# One interface as an ICD section, with the open items it raises. `connections` are the
+# connectors to list for it.
+icd_interface_section <- function(con, row, connections) {
+  fields <- interface_fields(con, row$id)
+  used <- interface_where_used(con, row$id)
+  links <- connections[connections$interface_id == row$id, , drop = FALSE]
+  rate <- interface_rate_text(row)
+  ranges <- vapply(seq_len(nrow(fields)), function(j) format_field_range(fields$range_state[j], fields$min_value[j], fields$max_value[j]), "")
+  open_items <- c(
+    if (any(fields$range_state == "placeholder")) sprintf("%s: range to be decided for %s.", row$name, paste(fields$name[fields$range_state == "placeholder"], collapse = ", ")),
+    if (nrow(links) == 0L) sprintf("%s has no connection yet.", row$name)
+  )
+  markdown <- paste0(
+    sprintf("## %s · %s {#%s}\n\n", row$id, row$name, tolower(row$id)),
+    if (!is.na(row$description)) paste0(row$description, "\n\n"),
+    sprintf("Flow: %s%s%s.\n\n", row$flow_type, if (nzchar(rate)) paste0(" · rate ", rate) else "", if (!is.na(row$transport)) paste0(" · over ", row$transport) else ""),
+    if (row$review_state == "unreviewed") "::: {.callout-warning}\nThis interface is an unreviewed AI draft.\n:::\n\n",
+    "### Fields\n\n", md_table(c("Field", "Type", "Unit", "Range", "Notes"), data.frame(fields$name, fields$value_type, fields$unit, ranges, fields$notes)), "\n\n",
+    "### Connections\n\n", md_table(c("Connector", "From", "To"), data.frame(links$id, sprintf("%s.%s", links$source, links$source_port), sprintf("%s.%s", links$target, links$target_port))), "\n\n",
+    "### Used by\n\n",
+    paste0("- ", c(
+      if (nrow(used$ports) > 0L) sprintf("Ports: %s", paste(sprintf("%s.%s (%s)", used$ports$element, used$ports$name, used$ports$direction), collapse = ", ")),
+      if (nrow(used$scenarios) > 0L) sprintf("Scenarios: %s", paste(sprintf("%s %s", used$scenarios$id, used$scenarios$name), collapse = ", ")),
+      if (nrow(used$events) > 0L) sprintf("State machine events: %s", paste(used$events$name, collapse = ", ")),
+      if (nrow(used$requirements) > 0L) sprintf("Requirements: %s", paste(used$requirements$id, collapse = ", "))
+    ), collapse = "\n"), "\n"
+  )
+  list(markdown = markdown, open_items = open_items)
+}
+
+icd_markdown <- function(con) {
+  interfaces <- DBI::dbGetQuery(con, "SELECT * FROM interface WHERE layer = 'physical' ORDER BY flow_type, name")
+  summary <- data.frame(ID = interfaces$id, Name = interfaces$name, Flow = interfaces$flow_type,
+                        Rate = vapply(seq_len(nrow(interfaces)), function(i) interface_rate_text(interfaces[i, ]), ""), Transport = interfaces$transport, stringsAsFactors = FALSE)
+  connections <- connection_rows(con)
+  sections <- lapply(seq_len(nrow(interfaces)), function(i) icd_interface_section(con, interfaces[i, ], connections))
+  open_items <- unlist(lapply(sections, function(section) section$open_items))
   paste0(
     "# Scope\n\n", get_setting(con, "scope_text", "The physical interfaces of the system."), "\n\n",
     sprintf("This document is generated from model %s. It lists %d interfaces and %d connections.\n\n", substr(model_hash(con), 1L, 19L), nrow(interfaces), nrow(connections)),
     "# Interface summary\n\n", md_table(c("ID", "Name", "Flow", "Rate", "Transport"), summary), "\n\n",
-    "# Interfaces\n\n", paste(sections, collapse = "\n"), "\n",
+    "# Interfaces\n\n", paste(vapply(sections, function(section) section$markdown, ""), collapse = "\n"), "\n",
     "# Open items\n\n", if (length(open_items) == 0L) "None.\n" else paste0("- ", open_items, collapse = "\n"), "\n"
   )
 }
 
-# Renders the ICD with the Quarto template: "html" (self-contained) or "pdf" (through Typst).
-render_icd <- function(con, path, format = c("html", "pdf")) {
+# Renders Markdown to a document with the Quarto template: "html" (self-contained) or
+# "pdf" (through Typst). `what` names the document in refusals.
+render_quarto_document <- function(markdown, title, path, format = c("html", "pdf"), what = "This document") {
   format <- match.arg(format)
   quarto <- find_quarto()
-  if (is.na(quarto)) refuse("The ICD needs Quarto. Install it, or set QUARTO_PATH.")
-  dir <- tempfile("icd")
+  if (is.na(quarto)) refuse(what, " needs Quarto. Install it, or set QUARTO_PATH.")
+  dir <- tempfile("doc")
   dir.create(dir)
   on.exit(unlink(dir, recursive = TRUE), add = TRUE)
-  template <- readLines(system.file("quarto", "icd.qmd", package = "modelbench"), encoding = "UTF-8")
+  template <- readLines(system.file("quarto", "document.qmd", package = "modelbench"), encoding = "UTF-8")
   fill <- function(text, key, value) gsub(paste0("{{", key, "}}"), value, text, fixed = TRUE)
-  text <- fill(fill(fill(paste(template, collapse = "\n"), "title", gsub("\"", "'", get_setting(con, "project_name", "System"))),
-                    "date", format(Sys.time(), "%Y-%m-%d", tz = "UTC")), "body", icd_markdown(con))
-  writeLines(text, file.path(dir, "icd.qmd"), useBytes = TRUE)
-  result <- processx::run(quarto, c("render", "icd.qmd", "--to", if (format == "pdf") "typst" else "html"), wd = dir, error_on_status = FALSE)
-  output <- file.path(dir, if (format == "pdf") "icd.pdf" else "icd.html")
-  if (result$status != 0L || !file.exists(output)) refuse("Quarto couldn't render the ICD: ", utils::tail(strsplit(result$stderr, "\n")[[1]], 1L))
+  text <- fill(fill(fill(paste(template, collapse = "\n"), "title", gsub("\"", "'", title)),
+                    "date", format(Sys.time(), "%Y-%m-%d", tz = "UTC")), "body", markdown)
+  writeLines(text, file.path(dir, "document.qmd"), useBytes = TRUE)
+  result <- processx::run(quarto, c("render", "document.qmd", "--to", if (format == "pdf") "typst" else "html"), wd = dir, error_on_status = FALSE)
+  output <- file.path(dir, if (format == "pdf") "document.pdf" else "document.html")
+  if (result$status != 0L || !file.exists(output)) refuse("Quarto couldn't render ", tolower(substr(what, 1L, 1L)), substring(what, 2L), ": ", utils::tail(strsplit(result$stderr, "\n")[[1]], 1L))
   file.copy(output, path, overwrite = TRUE)
   invisible(path)
+}
+
+render_icd <- function(con, path, format = c("html", "pdf")) {
+  render_quarto_document(icd_markdown(con), paste0(get_setting(con, "project_name", "System"), ": interface control document"),
+                         path, format, "The ICD")
 }

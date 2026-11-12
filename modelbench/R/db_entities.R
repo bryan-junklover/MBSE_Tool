@@ -4,7 +4,8 @@
 ENTITY_KEYS <- list(
   analysis_limit = c("analysis", "scope_id"),
   sm_event_scope = c("event_id", "state_id"),
-  sm_ignore = c("state_id", "event_id")
+  sm_ignore = c("state_id", "event_id"),
+  failure_waiver = c("rule", "subject_kind", "subject_id")
 )
 
 ENTITY_AREAS <- c(
@@ -16,7 +17,7 @@ ENTITY_AREAS <- c(
   act_node = "behavior", act_edge = "behavior", state_machine = "behavior",
   sm_state = "behavior", sm_event = "behavior", sm_event_scope = "behavior",
   sm_variable = "behavior", sm_transition = "behavior", sm_ignore = "behavior",
-  sm_assertion = "behavior"
+  sm_assertion = "behavior", failure_mode = "model", failure_waiver = "model"
 )
 
 ENTITY_PREFIXES <- c(
@@ -25,7 +26,7 @@ ENTITY_PREFIXES <- c(
   link = "L", test_case = "TC", scenario = "SC", seq_lifeline = "LL",
   seq_step = "ST", act_node = "N", act_edge = "G", state_machine = "SM",
   sm_state = "S", sm_event = "E", sm_variable = "VAR", sm_transition = "T",
-  sm_assertion = "A"
+  sm_assertion = "A", failure_mode = "FM"
 )
 
 # sprintf() format per prefix, matching the ids the sample uses.
@@ -36,7 +37,7 @@ ID_FORMATS <- c(
   E = "E-%02d", T = "T-%02d", VAR = "VAR-%d", LL = "LL-%d", A = "A-%03d",
   N = "N-%d", G = "G-%d", TC = "TC-%03d", VR = "VR-%04d", BL = "BL-%02d",
   PR = "PR-%04d", L = "L-%04d", V = "V-%04d", B = "B-%03d", VW = "VW-%04d",
-  CS = "CS-%04d", CF = "CF-%04d"
+  CS = "CS-%04d", CF = "CF-%04d", FM = "FM-%04d"
 )
 
 revisioned_kinds <- function() names(ENTITY_AREAS)
@@ -86,7 +87,8 @@ entity_prefix <- function(con, kind, fields) {
 # core must write their final revisions first (SCHEMA §6).
 ENTITY_CHILDREN <- list(
   stereotype = list(c("property_def", "stereotype_id")),
-  element = list(c("port", "element_id"), c("state_machine", "owner_element_id")),
+  element = list(c("port", "element_id"), c("state_machine", "owner_element_id"), c("element", "parent_id"),
+                 c("seq_lifeline", "element_id"), c("budget", "scope_element_id"), c("analysis_limit", "scope_id")),
   interface = list(c("interface_field", "interface_id")),
   port = list(c("connector", "source_port_id"), c("connector", "target_port_id")),
   scenario = list(c("seq_lifeline", "scenario_id"), c("seq_step", "scenario_id"),
@@ -101,6 +103,26 @@ ENTITY_CHILDREN <- list(
                   c("sm_ignore", "event_id"))
 )
 
+# References that a delete clears rather than following: the row stays, minus its link to
+# what went. `to` is "parent" to re-point at the deleted row's own parent instead of NULL.
+REFERENCE_CLEARS <- list(
+  element = list(list(kind = "requirement", column = "actor_element_id"),
+                 list(kind = "act_node", column = "performer_element_id")),
+  interface = list(list(kind = "port", column = "interface_id"),
+                   list(kind = "seq_step", column = "interface_id", also = "field_name"),
+                   list(kind = "sm_event", column = "interface_id", also = "field_name")),
+  requirement = list(list(kind = "requirement", column = "parent_id", to = "parent"),
+                     list(kind = "budget", column = "requirement_id"),
+                     list(kind = "analysis_limit", column = "requirement_id"),
+                     list(kind = "sm_assertion", column = "requirement_id"))
+)
+
 PROPERTY_OWNER_KINDS <- c("element", "connector", "interface", "requirement")
 LINK_END_KINDS <- c("requirement", "element", "connector", "interface", "scenario",
-                    "state_machine", "test_case", "sm_assertion")
+                    "state_machine", "test_case", "sm_assertion", "failure_mode", "sm_event", "sm_transition")
+
+# What a failure mode can be about, and what each failure link may point at.
+FAILURE_SUBJECT_KINDS <- c("element", "interface", "port", "sm_state")
+WAIVER_SUBJECT_KINDS <- c("port", "element", "interface_field")
+FAILURE_LINK_TARGETS <- list(detected_by = c("sm_event", "requirement", "test_case"),
+                             handled_by = c("sm_transition", "requirement", "element"))

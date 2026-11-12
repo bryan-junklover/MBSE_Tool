@@ -35,7 +35,7 @@ test_that("field ranges take a range, a placeholder or n/a, and refuse nonsense"
   })
 })
 
-test_that("adding starts with placeholders, deleting checks what's in use", {
+test_that("adding starts with placeholders, and deleting one in use unlinks its ports", {
   state <- local_sample_state()
   shiny::testServer(mod_interfaces_server, args = list(state = state), {
     session$setInputs(add = 1)
@@ -47,8 +47,12 @@ test_that("adding starts with placeholders, deleting checks what's in use", {
     session$setInputs(delete = id)
     expect_null(read_entity(con(), "interface", id))
     expect_identical(status_counts(con())$placeholders, before)
-    # Ports use this one, so the database says no.
+    # Ports use this one: they stay, without an interface, and Undo puts it back.
+    ports <- DBI::dbGetQuery(con(), "SELECT id FROM port WHERE interface_id = 'IF-002'")$id
     session$setInputs(delete = "IF-002")
-    expect_false(is.null(read_entity(con(), "interface", "IF-002")))
+    expect_null(read_entity(con(), "interface", "IF-002"))
+    expect_true(is.na(read_entity(con(), "port", ports[1])$interface_id))
+    state$commands(undo_command(con(), state$commands()))
+    expect_identical(read_entity(con(), "port", ports[1])$interface_id, "IF-002")
   })
 })

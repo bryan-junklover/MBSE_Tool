@@ -1,86 +1,482 @@
 # ModelBench user guide
 
-ModelBench keeps a system's requirements and its model in one project file. You write
-the requirements first, then build the structure, interfaces and behaviour that satisfy
-them. An AI coach asks questions along the way, but it never decides anything: every
-value, link and commit is yours.
+ModelBench keeps a system's requirements and its model in one project file. You write the
+requirements, then build the structure, interfaces and behaviour that satisfy them, and check
+how the system fails. Diagrams, tables and documents are all views of that one model: change
+something in one place and every view shows it.
 
-## Starting
+An AI coach can ask questions and sketch drafts along the way. It never decides anything:
+every value, link, response and commit is yours, and the code, not the prompt, enforces that.
 
-Open `MBSE_Tool.Rproj` in RStudio, then open `app/app.R` and click **Run App**. The app
-opens your workspace folder. If it's empty, it creates the Survey UAV sample, which is a
-good place to look around.
+For a step-by-step walk through a new project, see the **How-to** tab.
 
-Projects live in **Project**. That's also where you choose AI providers, route each
-task to a model, set a daily spend cap, and turn on **Local only**, which keeps every
-call on your own machine.
+## Contents
 
-## The five workspaces
+1. Starting the app
+2. Finding your way round
+3. Project: settings, scope and glossary
+4. Write: requirements
+5. Model: structure, flows, functions and interfaces
+6. Behavior: scenarios, state machines and failure modes
+7. Analyze: health, review, baselines and documents
+8. Asking the model
+9. AI rules and data protection
+10. Keyboard and accessibility
+11. Troubleshooting
 
-**Write** is for requirements.
+## 1. Starting the app
 
-- **Draft:** type a requirement. The gate scores it as you type, with no AI involved.
-  Once it passes, the coach reviews it and asks questions. Commit is enabled only when
-  the review matches the text on screen. A requirement with `[value]` in it can't be
-  committed: that's a number still to be decided.
-- **Specification:** the outline and table of every requirement. You can import from
-  CSV, Excel or text. Export as ReqIF, CSV, Markdown or PDF.
-- **Traceability:** the requirements × components matrix. Click a cell to link or
-  unlink. AI suggestions need your rationale before any Link button works.
+Open `MBSE_Tool.Rproj` in RStudio, open `app/app.R` and click **Run App**.
 
-**Model** is for structure.
+- **Where projects live:** each project is one `.sqlite` file in your workspace folder. That's
+  R's user data folder for `modelbench`, unless `MODELBENCH_WORKSPACE_DIR` points somewhere else.
+- **The sample:** if the workspace is empty, the app creates the Survey UAV sample, a small
+  quadcopter model with requirements, structure, behaviour and failure modes. It's a good place
+  to look around before starting your own.
+- **Upgrades:** an older project is upgraded the first time it opens. Its data is kept, and every
+  link is checked before the upgrade is saved.
+- **Exports:** the interface control document and the stakeholder documents need Quarto.
+  RStudio includes it; otherwise install it or set `QUARTO_PATH`.
 
-- **Structure:** the block diagram. Drag between ports to connect them, double-click a
-  block to open it, and use the arrow keys to move between connected blocks. Roll-ups
-  such as mass and power appear beside budgets.
-- **Flows** and **Functional:** the same model seen by flow type, and as functions
-  allocated to components.
-- **Interfaces:** each interface's fields and where it's used. Export the interface
-  control document (ICD) as HTML or PDF from here. The ICD needs Quarto, which RStudio
-  includes.
-- **Stakeholder:** a plain-words view for people outside engineering, with "Are we on
-  track?" meters and a PDF brief.
+## 2. Finding your way round
 
-**Behavior** is for what the system does.
+The top bar has the project name, the five workspaces (**Project**, **Write**, **Model**,
+**Behavior**, **Analyze**), **Help**, and **Ask the model**. Under it, a status strip shows the
+coach, the AI policy, how many unreviewed AI drafts and placeholders the project holds, and
+today's AI calls and spend. Click the drafts count to open them.
 
-- **Scenarios:** sequence diagrams edited as a table of steps (drag rows to reorder),
-  and activity diagrams. Amber means a step names a field its interface doesn't have.
-  Dashed blue means an AI draft that needs your review.
-- **State machines:** edit states and transitions, then run the simulator. Choose
-  where to start, fire events, and watch the trace. Guards and effects use a small
-  language: `gnss_valid == false`, `soc := soc - 5`, `prop(Power System.battery_capacity) > 4000`.
-  The Completeness panel lists event/state pairs that need a transition, or an
-  "ignore" with your note. Requirement checks run every assertion live.
-- **Behavioral impact:** for a change since the last baseline, the scenarios it
-  reaches, with the affected steps highlighted, before and after.
+Each screen has one bar at the top: the workspace's tabs on the left, that screen's actions on
+the right. The app remembers which screen you were on in each project.
 
-**Analyze** is for checking.
+**Columns.** Drag a side column's edge to widen it, or click the small arrow on the edge to hide
+it. A hidden column leaves a narrow rail with its name; click the rail to bring it back. You can
+also focus the edge and use ← and → (⇧ for bigger steps), or Home and End. Widths are remembered.
+In a narrow window, columns open over the page from their rails instead, and Esc closes them.
 
-- **Health:** everything that blocks the next baseline, with links to fix each one.
-- **Review queue:** the AI's questions and sketches. Nothing joins the model until you
-  add it with a note in your own words, and even then it stays an unreviewed draft
-  until you review it.
-- **Baselines & impact:** compare a baseline with the working copy, see what each
-  change reaches, roll back (which first saves a safety baseline), and create the next
-  baseline once nothing blocks it.
+**Diagrams** open fitted to the canvas.
 
-## Asking the model
+- The buttons at the bottom right fit the diagram, zoom out, show it at 100% and zoom in.
+- On the canvas, `+`, `-`, `0` (fit) and `1` (100%) do the same.
+- Ctrl or ⌘ with the scroll wheel zooms where the pointer is, and dragging empty canvas moves the
+  view.
+- ⌘Z and ⇧⌘Z (Ctrl on Windows and Linux) undo and redo while the canvas has focus.
+- **Auto-layout** rearranges a diagram. Blocks marked **Keep this position on auto-layout** stay
+  put.
+- Connector labels hide when the diagram is too small to read them.
 
-**Ask the model**, at the top right, opens a chat that reads the model through tools,
-which show as small chips above each answer. It can't change anything. **Highlight on
-diagram** selects the parts an answer is about, and **Attach to proposal** adds the
-answer to an open question in the Review queue. A number the tools didn't give shows as
-`[value]`, so the chat can't slip in figures of its own.
+**Undo.** **Undo ‹what›** and **Redo ‹what›** at the right of the status strip say exactly what
+they would undo or redo. Undo covers the whole session, most recent first, wherever the edit was
+made: requirements (commit, save, inspector edits, deprecate), structure, interfaces, links,
+behaviour, failure modes, test cases, and the properties and budgets in Project. The diagram
+screens' own Undo buttons use the same list. It starts afresh when you switch project or roll
+back.
 
-## AI rules worth knowing
+Some changes can't be undone:
+- recorded test results, which are evidence;
+- imports;
+- dismissing an AI item;
+- the glossary, units, ID prefixes and scope.
 
-- The AI asks questions and sketches drafts. Values, links and commits come from you.
-- Every call is logged with its prompt, model and cost. **See the prompt** shows what was sent.
-- When a local server is down or a cloud key is missing, the panel says so in plain
-  words, and the rest of the app keeps working.
+Anything that deletes asks first, and says what goes with it.
 
-## Keyboard and accessibility
+**Jumping and coming back.** Links on Health, the Review queue and elsewhere take you to the
+thing they're about. A bar then offers **Back to …** the screen you came from.
 
-Everything works from the keyboard. Focus always shows as a blue outline. Diagrams
-have the tree and tables beside them, and colour is never the only signal: gaps say
-"Gap", and AI items carry the AI badge or a dashed outline.
+## 3. Project: settings, scope and glossary
+
+**General**
+
+- **Open project** switches projects. **New project name** and **Create project** start an
+  empty one.
+- **Name of this project** renames it. **Copy as new project…** copies everything, with its
+  history and baselines, and opens the copy. **Delete another project…** deletes a project
+  you don't have open, for good.
+- **Scope:** a few sentences on what the system is. It's saved as you type. The AI is given it
+  for context, and documents quote it.
+- **ID prefixes:** the prefixes for new requirements and components, such as `SYS` and `C`.
+  Existing ids never change.
+
+**Units & properties**
+
+- **Analysis limits** set a limit on a calculated result, such as endurance, over part of the
+  system. Health and baselines report any that miss.
+- **Saved views** add your own Structure views, by domain or stereotype, offered under
+  **Saved view**. Built-in views stay.
+- **Stereotypes** label kinds of component, such as HW, SW or Avionics. One no component uses
+  can be deleted.
+- **Properties** are what a component can hold, such as Mass in kg or Supplier as text. A
+  number property can roll up: sum, largest or smallest, up the tree and times how many of each
+  part.
+- **Budgets** limit a rolled-up property over part of the system, at most or at least, and can
+  name the requirement they come from. They're checked on every edit; Health and the Structure
+  inspector show any that fail, and any marked *incomplete* because values are still to be set.
+- A property's label, roll-up and unit can be edited (the unit within the same quantity), and
+  an unused property can be deleted.
+- **Units:** every project has the standard units. Add your own with its symbol, what it
+  measures, its SI unit, and its factor (plus an offset, as for °C). A quantity already listed
+  keeps its SI unit, so values convert between units.
+
+**Glossary.** Terms with definitions. A term tied to an element is an alias of it, so the gate
+recognises "battery" as Power System. A term with no element isn't a model term.
+
+**AI**
+
+- **AI providers:** Anthropic and OpenAI in the cloud, or LM Studio on your machine. A cloud key
+  goes to your operating system's keyring, never into the project file. **Test the connection**
+  says in plain words whether it works.
+- **Task routing:** for each AI task, choose its provider, model and fallback, and whether it
+  runs on every edit or on demand.
+- **Daily cloud spend cap** and **Coach wait after typing stops**.
+- **Coaching policy:** a table of what the AI may do, what's always yours, and how the code
+  enforces each rule.
+
+**Data protection.** **Local only** keeps every call on your machine. **Redact before cloud
+calls** takes one term per line; each is replaced before anything is sent.
+
+## 4. Write: requirements
+
+### Draft
+
+Write one requirement at a time.
+
+- **Free text** or the **EARS builder** (pattern, trigger, actor, response, bound, value and unit,
+  then **Put the sentence in the draft**).
+- **The gate** scores the draft as you type. It's code with no AI involved. A good requirement:
+  - has exactly one "shall", with a named system or component before it;
+  - is a complete sentence;
+  - states a measurable bound (a number with a unit, or a phrase such as "only in");
+  - states one concept, in the active voice;
+  - avoids vague words such as "fast" or "user-friendly".
+- **Terms in this draft** shows the words the gate matched against the model. An unknown term
+  can be added to the model as a component, a property of a component, or a field of an
+  interface. Its value starts as a placeholder.
+- **The coach** reviews a draft once it passes the gate, and asks questions. Commit is enabled
+  only when the coach's review matches the text on screen. A question you disagree with can be
+  dismissed, with a reason.
+- **Parent**, **Level** (stakeholder, system, subsystem), **Type**, **Verify by** and
+  **Short title** go with the draft.
+- `[value]` marks a number still to be decided. A draft holding one can be saved
+  (**Save draft**) but not committed.
+- **Commit to specification** adds it. **New requirement** clears the page. Anything that would
+  replace text you haven't saved asks first.
+
+### Specification
+
+The outline and table of every requirement, sortable by gate score (**Lowest score first**).
+
+- Select a requirement to edit its details in the inspector: short title, parent, type,
+  verify by, level and rationale. **Derives from** and **Refines** trace it to other
+  requirements outside the parent tree. A child at a higher level than its parent is
+  flagged.
+- The score is the gate's score against the model as it is now. A committed requirement no
+  coach reviewed is marked *uncoached* under its status; **Ask the coach** reviews it as it
+  stands and marks it coached, without changing its text or its evidence.
+- **Rewrite it in Write** reopens committed text in Draft, and the gate checks it again.
+- **Deprecate…** retires a committed requirement, with your reason. It leaves the
+  specification, the counts and Health, but its history and baselines keep it. A failure it
+  handled no longer counts as handled. **Delete draft…** removes a draft.
+- **Verification:**
+  - Add a test case (name and method), then **Record result** with pass, fail or inconclusive,
+    an evidence reference and a note.
+  - A test case's name and method can be edited. **Unlink** stops it verifying the
+    requirement: its results stay as history but no longer count.
+  - Evidence goes stale when something it was recorded against changes, such as a value, the
+    requirement's text or its verification method. Edits that change nothing it depends on
+    leave it current.
+  - Assertions that verify the requirement are listed too, with how they run now and their
+    last recorded result.
+  - A requirement counts as verified when at least one result passes and none fails.
+- **Import** from CSV, Excel or text. Rows that pass the gate, or hold only a `[value]`, become
+  drafts; the rest wait for you to fix or skip. Level, type, verify by, short title and
+  rationale columns are read back, as an export writes them, and a row whose text is already
+  in the specification is skipped, so re-importing an export adds nothing twice.
+- **Export** as ReqIF, CSV, Markdown or PDF.
+
+### Traceability
+
+The requirements × components matrix, plus functions × components.
+
+- Click a cell to link a requirement to the component that satisfies it, or to unlink. A
+  **Rationale** is optional for your own links.
+- **Ask AI about this** ranks candidate components and argues for them as questions. Choosing one
+  needs your rationale.
+- Rows with nothing allocated are marked as gaps.
+
+## 5. Model: structure, flows, functions and interfaces
+
+### Structure
+
+The block diagram of components, their ports and connectors. The model tree is on the left and
+the inspector on the right.
+
+- **Tools:** **Select**, **Component** (click the canvas to add one), **Port** (click a block) and
+  **Connect** (drag from port to port). In Select you can also drag from port to port.
+- **The first component** in a project is the whole system. The diagram opens inside it, and
+  later components are its parts.
+- **Opening a block:** double-click a component to open the level inside it. The breadcrumb
+  takes you back up.
+- **Group into subsystem** wraps the selected components in a new parent.
+- **Saved view** picks a filtered view: All components, Power & mass budget, Software only
+  (components whose domain is Software), or TRL below 6.
+- **The inspector**, for a selected component:
+  - name, stereotype, domain (hardware, software, hardware and software, other), status, how
+    many, and description;
+  - properties, with units. **Add a property** offers the project's property definitions.
+  - **Part of**: move it under another component. **Ungroup…** moves its parts up a level and
+    removes it.
+  - ports, each with its name, direction and interface editable; a change that would break one
+    of its connectors is refused, naming it. Each property has **Remove**.
+  - the requirements linked to it.
+  - **Runs on** (software components only): the hardware it runs on. Hardware lists **Software
+    running here**.
+  - **Keep this position on auto-layout**, and delete.
+- **With nothing selected**, the inspector shows the level's roll-ups (mass, power and budgets
+  against their limits) and its open gaps.
+- **Gaps** are dashed amber with a note: a port with no connector, or software with nothing
+  recorded to run on.
+- **Connector checks:** a connector must join ports with the same interface and compatible
+  directions. A refused connection says why.
+- **Deleting** says what goes with the component (its parts, ports, connectors, scenario
+  lifelines, budgets) and what stays but is unlinked (requirements that named it as their
+  actor). Undo brings it all back.
+
+### Flows
+
+The same structure, coloured by what moves along each connector: data, energy or matter.
+**Show** picks the flow types, and **Show flow quantities** adds rates and what each connector
+carries. Select a connector to record what it **Carries**, such as 28 V or 380 W.
+
+Flows also shows **outside equipment**: things beyond the system boundary that it exchanges
+with, such as an operator or a base station. The **Outside equipment** tool adds one, and
+**Port** and **Connect** work as on Structure.
+
+### Functional
+
+The functions and the flows between them, each function allocated to the component that
+performs it.
+
+- **Function** adds one, and ports and connections work as on Structure.
+- **Allocate to** a component in the inspector, or **Ask AI about this**.
+- **Carried by** names the physical connector that carries a functional flow. The
+  **Consistency** panel lists flows with no physical path.
+
+### Interfaces
+
+The interface dictionary. **Layer** switches between physical interfaces, which ports on
+components carry, and functional ones, which functions exchange.
+
+- Each interface has a flow type, a rate, a transport, and fields.
+- Each field has a type, a unit, and a range, which can be "to be decided" or "not applicable".
+- Renaming a field or interface carries through to what names it: failure modes, scenario
+  steps, events and connector labels. Renaming a component rewrites the guards and effects that
+  name it with `prop()`.
+- **Where it's used** lists the ports, scenarios, state machine events and requirements that
+  refer to the interface.
+- **ICD (HTML)** and **ICD (PDF)** export the interface control document.
+
+### Stakeholder
+
+A plain-words view for people outside engineering. It has the main parts in a sentence each,
+**Are we on track?** meters for budgets and analyses, and open questions.
+**Write the summary with AI** drafts the sentences; **Export as PDF brief** makes a handout.
+
+## 6. Behavior: scenarios, state machines and failure modes
+
+### Scenarios
+
+Sequence or activity diagrams, edited as a table of steps.
+
+- **New scenario…** picks a name and the kind of diagram.
+- In a sequence diagram:
+  - **+ Lifeline** adds a participant.
+  - **+ Message** adds a step, with its interface, field and guard in the step inspector.
+  - **+ Fragment** and **+ Note** add the rest.
+  - Drag rows to reorder them, or use a row's ⋯ menu.
+  - Drag the bar under the diagram to share the height between diagram and table.
+- **Sketch with AI…** drafts a scenario from your description. Its steps arrive as unreviewed
+  drafts.
+- **Highlighting:** amber means a step names a field its interface doesn't have. Dashed blue is
+  an AI draft that needs your review.
+- Deleting a fragment's start or end removes the whole fragment, with its "else" lines, and
+  changing a step's kind fills in what the new kind needs.
+- **Edit scenario** has **Add the activity diagram** (or sequence) when it has only one, its
+  name, description, its lifelines (each with **Remove**, which takes
+  its messages) and **Delete scenario…**. An AI sketch that's wrong can be thrown away with
+  **Discard sketch…**. Reviewing a sketch reviews its steps with it.
+
+### State machines
+
+**New state machine…** creates one for a component, starting in one state. **State machine**
+chooses which one to edit. States, events and variables each have an **Add…** button, and you
+drag between a state's handles to add a transition. The inspector edits the selected state or
+transition.
+
+Under the list of states you can:
+- rename the machine, or delete it;
+- rename an event, tie it to the interface field that raises it, or remove it;
+- set a variable's initial value and unit, or remove it;
+- see the events **Ignored on purpose**, each with **Check again**.
+
+A change that would break an assertion or an expression is refused, naming what uses the
+event or variable.
+
+- **Guards and effects** use a small language: `gnss_valid == false`, `soc := soc - 5`,
+  `prop(Power System.battery_capacity) > 4000`. A transition can wait for its condition to hold
+  for a time.
+- **Completeness** lists each event/state pair that needs a transition, or an **Ignore, with my
+  note**. It counts the pairs in scope: a state's **Must handle** ticks. A new event is ticked
+  in every state that isn't final, and a new state ticks every event, so they're checked from
+  the start; untick where an event doesn't apply. Events no state must handle are named at the
+  top.
+- **Checks** holds assertions. Each one's description and the requirement it verifies can be
+  changed, and it has **Delete**. To change what it fires or expects, delete it and add it
+  again. **Add assertion…** builds one from a start state, a list of events
+  and the state it should end in, optionally tied to a requirement. **Run and record** runs them
+  all, and a requirement's checks run live.
+- **The simulator** runs under the canvas. Choose where to start, fire events (those that can fire
+  from here are listed first), and open the trace. **Reset** starts again.
+- **Ask about this state machine** asks the AI about gaps in it.
+
+### Failure modes
+
+What can fail, why, what happens next, and how the system responds.
+
+- **Left:** the failure modes. Those with an open response are listed first.
+- **Centre:** the editor. You set:
+  - **What fails:** a component, an interface (optionally one field), a port, or a state.
+  - **Cause:** lost, stale, out of range, wrong value, degraded, failed, open circuit, short
+    circuit, over-temperature, mechanical or other, plus a cause in your own words.
+  - **Effects:** the effect nearby and the effect on the system.
+  - **Response:** not decided, handled, accepted or unhandled, with a note. "Accepted" needs a
+    reason.
+  - **Detected by:** a state machine event, a requirement or a test case.
+  - **Handled by:** a transition, a requirement or a component.
+- **Effect chain**, under the editor, traces what the failure leads to through connectors, parts
+  and "runs on" links:
+  - **→** something stops working;
+  - **✓** a loss is handled or accepted where it lands;
+  - **⚠** a loss nobody has decided about.
+
+  Losing power stops the receiver, and the chain goes on. Losing data with nothing recorded is
+  flagged, and the chain stops there.
+- **Right: the checks.**
+  - **Open responses:** a response that isn't decided, a failure marked handled with nothing
+    handling it, or one handled by a requirement nothing verifies.
+  - **Cases nobody has recorded:** software receiving a signal from hardware with no "lost" or
+    "stale" case, a power feed with no "lost" case, a part that draws power with no
+    over-temperature case, and a field with a range but no out-of-range case.
+  - **Add … failure** starts a failure mode from a check. **Doesn't apply…** sets a check aside
+    with your reason, and **Check again** brings it back.
+- **+ Failure mode for…** adds one for anything in the model.
+- **Suggest with AI** asks the AI for failures nobody has recorded. Each suggestion arrives as a
+  card:
+  1. **Add as unreviewed draft**, with your note, makes it an AI failure mode.
+  2. **Review, with my note** makes it part of the model.
+  3. Only then can you set its response.
+
+### Behavioral impact
+
+For a change since the last baseline, the scenarios it reaches, with the affected steps
+highlighted before and after.
+
+## 7. Analyze: health, review, baselines and documents
+
+### Health
+
+Everything that blocks the next baseline, with a link to fix each one. Below that are cards for:
+- Requirements: gate failures, missing coach reviews, nothing allocated, no verification method.
+- Architecture: unconnected ports, components with no requirements, software with nothing to run
+  on, gate findings.
+- Functional: unallocated functions, and flows with no physical path.
+- Behavior: missing fields and unhandled event/state pairs.
+- Failures: failure modes, open responses, and cases not covered.
+- Budgets and AI contributions.
+
+**Recompute** runs the analyses again.
+
+### Review queue
+
+The AI's questions and sketches, plus structural gaps the code finds.
+
+- **Ask AI about gaps** asks for more.
+- **Keep:** a sketch joins the model only when you add it with a note in your own words, and it
+  then stays an unreviewed draft until you review it. If what you kept is undone or deleted,
+  the item opens again; an item about something no longer in the model is closed.
+- **Start from this in Write** opens a suggested requirement in Draft. It counts as kept once
+  you save or commit it.
+- **Dismiss with reason** closes an item.
+- **Show on diagram** goes to what an item is about. **See the prompt** shows exactly what was
+  sent.
+
+### Baselines & impact
+
+- **Compare** a baseline with the working copy, or with another baseline. Changes are grouped by
+  where they start.
+- Select a change to see what it reaches. **Rate and explain with AI** adds a narrative.
+- **Roll back…** puts the model back as it was at a baseline. It saves a safety baseline first,
+  so a rollback can itself be undone. Drafts stay as they are, and a requirement committed
+  since the baseline goes back to the draft it was then.
+- **What a baseline holds:** the model: requirements that were committed, structure,
+  interfaces, behaviour, failure modes, budgets and properties. It doesn't hold drafts or
+  their links, or project settings: the glossary, units, ID prefixes, scope, viewpoints, saved
+  views or diagram layout. A rollback leaves those as they are.
+- **Create baseline** is enabled once nothing blocks it. Its button names the blockers until then.
+  The dialog also lists what doesn't block but is worth knowing (failing or incomplete budgets,
+  failing assertions, unhandled pairs, open failure responses, unallocated requirements), and
+  writes that list into the baseline's note.
+
+### Documents
+
+Read-only documents for each group of readers, generated from the model.
+
+| Document | For | Covers |
+|---|---|---|
+| **Hardware** | Hardware engineers | Physical breakdown (with the software each part runs), interfaces, budgets and properties, physical failures and their effect chains, requirements |
+| **Software** | Software engineers | Where each piece of software runs, signals with their ranges, state and transition tables, software failures and their effect chains, requirements |
+| **Systems** | Systems engineering and reporting | Everything |
+
+Each ends with the open items in its part of the model. **From** builds a document from a
+baseline instead of the working copy; the working copy isn't touched. **Export HTML** and
+**Export PDF** save it.
+
+## 8. Asking the model
+
+**Ask the model** opens a chat that reads the model through tools, which show as small chips
+above each answer. It can't change anything.
+
+- **Highlight on diagram** selects the parts an answer is about.
+- **Attach to proposal** adds the answer to an open question in the Review queue.
+- A number the tools didn't give shows as `[value]`, so the chat can't slip in figures of its own.
+
+## 9. AI rules and data protection
+
+- **The AI asks and sketches.** Values, links, responses and commits come from you.
+- **AI drafts are marked.** They're unreviewed until you review them with a note, and they block
+  a baseline until then.
+- **The AI never sees ids.** Model content is sent as numbered names such as C5, and the app maps
+  them back, so the AI can't invent a link to something that doesn't exist.
+- **The AI can't invent numbers.** Any number it writes becomes `[value]`.
+- **Every call is logged** with its prompt, model and cost. **See the prompt** shows what was sent.
+- **When something's down,** such as a local server or a missing cloud key, the panel says so in
+  plain words, and the rest of the app keeps working.
+- **Spending:** cloud calls stop at the daily spend cap. **Local only** keeps every call on your
+  machine.
+
+## 10. Keyboard and accessibility
+
+- **Keyboard:** everything works from the keyboard, and focus always shows as a blue outline.
+- **Diagrams** have the model tree and tables beside them. The arrow keys move between connected
+  blocks.
+- **Colour is never the only signal:** gaps say "Gap", and AI items carry the AI badge or a dashed
+  outline.
+
+## 11. Troubleshooting
+
+- **A diagram has no zoom buttons, or straight connectors.** Your R session holds an old copy of
+  the diagram widget. The app reloads it at start-up; if that isn't possible, it asks you to
+  restart R.
+- **Export says it needs Quarto.** Install Quarto, or set `QUARTO_PATH` to it.
+- **An edit is refused.** The message says why: for example, a connector between incompatible
+  ports, or "accepted" without a reason. Nothing is changed.
+- **The coach or AI says it can't run.** Check **Project › AI**. The provider may need a key, the
+  local server may be off, or the daily cap may be reached.

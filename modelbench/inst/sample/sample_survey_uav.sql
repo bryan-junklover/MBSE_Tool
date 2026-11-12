@@ -12,7 +12,8 @@ INSERT INTO project_meta (key, value) VALUES
  ('scope_text','A battery-powered quadcopter that flies a pre-planned route and photographs an area for mapping, operated from a ground laptop over radio.'),
  ('coaching_policy','tiered'), ('local_only','0'), ('coach_wait_ms','2000');
 
-INSERT INTO unit (symbol, quantity, si_symbol, si_factor, si_offset) VALUES
+-- The schema seeds these too; OR IGNORE keeps the sample loading on top of it.
+INSERT OR IGNORE INTO unit (symbol, quantity, si_symbol, si_factor, si_offset) VALUES
  ('kg','mass','kg',1,0), ('g','mass','kg',0.001,0),
  ('W','power','W',1,0), ('V','voltage','V',1,0), ('A','current','A',1,0),
  ('mAh','charge','C',3.6,0), ('Wh','energy','J',3600,0),
@@ -265,6 +266,27 @@ INSERT INTO link (id, link_type, source_kind, source_id, target_kind, target_id)
  ('L-0307','realized_by','connector','K-0019','connector','K-0007'),
  ('L-0308','realized_by','connector','K-0020','connector','K-0008'),
  ('L-0309','realized_by','connector','K-0021','connector','K-0010');
+-- Software and the hardware it runs on. Ground Control Software has no host yet: a gap.
+INSERT INTO link (id, link_type, source_kind, source_id, target_kind, target_id) VALUES
+ ('L-0310','hosted_on','element','C-009','element','C-008');
+
+-- Failure modes (docs/VIEWPOINTS_AND_FAILURES.md §3): one handled, one handled with a gap
+-- in Land, one unhandled and one not yet decided.
+INSERT INTO failure_mode (id, subject_kind, subject_id, field_name, cause_kind, cause, local_effect, system_effect, response_state, response_note) VALUES
+ ('FM-0001','interface','IF-002','gnss_valid','lost','GNSS signal lost: jamming, or the sky is blocked',
+  'No position fix','The drone can''t hold its survey track','handled','Return to home on inertial navigation after 3 s'),
+ ('FM-0002','interface','IF-009',NULL,'lost','Radio link drops, beyond range or blocked by terrain',
+  'No telemetry or commands','The operator loses contact with the drone','handled','Hold position, and return home if the link stays down'),
+ ('FM-0003','port','P-0003',NULL,'lost','Bus brown-out, or the power connector works loose',
+  'The flight controller resets','Loss of control: the drone falls','unhandled',NULL),
+ ('FM-0004','element','C-003',NULL,'over_temperature','A battery cell overheats under high current',
+  'The cell vents','Fire risk, and a forced landing','placeholder',NULL);
+INSERT INTO link (id, link_type, source_kind, source_id, target_kind, target_id) VALUES
+ ('L-0311','detected_by','failure_mode','FM-0001','sm_event','E-04'),
+ ('L-0312','handled_by','failure_mode','FM-0001','sm_transition','T-05'),
+ ('L-0313','handled_by','failure_mode','FM-0001','requirement','SYS-012'),
+ ('L-0314','detected_by','failure_mode','FM-0002','sm_event','E-06'),
+ ('L-0315','handled_by','failure_mode','FM-0002','sm_transition','T-04');
 
 INSERT INTO test_case (id, name, method, description) VALUES
  ('TC-007','Endurance flight test','test','Hover-cruise profile at MTOM until reserve');
@@ -388,7 +410,7 @@ INSERT INTO ai_proposal (id, task, proposal_kind, source, target_kind, target_id
 INSERT INTO id_counter (prefix, next_num) VALUES
  ('STK',4),('SYS',32),('C',11),('F',9),('EXT',3),('IF',18),('FLD',11),('P',46),('K',22),('PD',10),('STY',5),('ST',20),
  ('SC',5),('SM',2),('E',12),('T',12),('VAR',4),('LL',14),('A',2),('N',9),('G',10),
- ('TC',8),('VR',2),('BL',4),('PR',6),('L',310),('V',109),('B',3);
+ ('TC',8),('VR',2),('BL',4),('PR',6),('L',316),('FM',5),('V',109),('B',3);
 
 -- Changes since BL-03 (applied by tools/build_sample_project.R through the write path):
 --   1. One change set: V-0013 battery_capacity 5000 -> 4200 mAh and V-0003 Power System mass 1.47 -> 1.36 kg

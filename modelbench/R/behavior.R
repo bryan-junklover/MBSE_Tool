@@ -96,6 +96,49 @@ reorder_steps <- function(con, scenario_id, step_ids) {
   })
 }
 
+# Deletes a step. A fragment's opener, its "else" lines and its closer go together, so no
+# fragment is left half open (review G3).
+delete_seq_step <- function(con, step_id, author = "engineer") {
+  step <- read_entity(con, "seq_step", step_id)
+  if (is.null(step)) refuse("That step no longer exists.")
+  if (!step$step_kind %in% c("fragment_open", "fragment_close")) return(delete_entity(con, "seq_step", step_id, author))
+  steps <- DBI::dbGetQuery(con, "SELECT id, seq, step_kind FROM seq_step WHERE scenario_id = ? ORDER BY seq", params = list(step$scenario_id))
+  at <- match(step_id, steps$id)
+  depth <- 0L
+  group <- step_id
+  walk <- if (step$step_kind == "fragment_open") seq(at, nrow(steps)) else rev(seq_len(at))
+  opening <- if (step$step_kind == "fragment_open") "fragment_open" else "fragment_close"
+  for (i in walk) {
+    kind <- steps$step_kind[i]
+    if (kind == opening) depth <- depth + 1L
+    if (kind %in% c("fragment_open", "fragment_close") && kind != opening) depth <- depth - 1L
+    if (depth == 1L && kind == "fragment_else") group <- c(group, steps$id[i])
+    if (depth == 0L) {
+      group <- c(group, steps$id[i])
+      break
+    }
+  }
+  with_change_set(con, function(change_set) {
+    for (id in unique(group)) if (!is.null(read_entity(con, "seq_step", id))) delete_entity(con, "seq_step", id, author, "Fragment removed", change_set)
+    list(change_set = change_set, id = step_id, area = "behavior")
+  })
+}
+
+# Reviews an AI-sketched scenario and every unreviewed step and activity node in it, with
+# one note (review G6).
+review_scenario_all <- function(con, scenario_id, note, author = "engineer") {
+  if (!nzchar(trimws(note))) refuse("Reviewing needs a note in your own words.")
+  with_change_set(con, function(change_set) {
+    for (kind in c("seq_step", "act_node")) {
+      ids <- DBI::dbGetQuery(con, sprintf("SELECT id FROM %s WHERE scenario_id = ? AND review_state = 'unreviewed'", kind), params = list(scenario_id))$id
+      for (id in ids) write_entity(con, kind, id, list(review_state = "reviewed", review_note = trimws(note)), author, "Reviewed with the scenario", change_set)
+    }
+    scenario <- read_entity(con, "scenario", scenario_id)
+    if (identical(scenario$review_state, "unreviewed")) write_scenario(con, scenario_id, list(review_state = "reviewed", review_note = trimws(note)), author, "Reviewed", change_set)
+    list(change_set = change_set, id = scenario_id, area = "behavior")
+  })
+}
+
 # An edit from the step table: the timing cell is one box for three states.
 update_step_field <- function(con, step_id, field, value) {
   value <- trimws(value)
@@ -113,6 +156,17 @@ update_step_field <- function(con, step_id, field, value) {
                    stats::setNames(list(if (blank) NA_character_ else value), field))
   if (field == "label" && blank) refuse("A step needs a label.")
   if (field == "interface_id") fields$field_name <- NA_character_
+  # A change of kind fills in what the new kind needs (review G3).
+  if (field == "step_kind") {
+    step <- read_entity(con, "seq_step", step_id)
+    if (value == "message" && (is.na(step$from_lifeline_id) || is.na(step$to_lifeline_id))) {
+      lifelines <- DBI::dbGetQuery(con, "SELECT id FROM seq_lifeline WHERE scenario_id = ? ORDER BY sort_order, id", params = list(step$scenario_id))$id
+      if (length(lifelines) == 0L) refuse("Add a lifeline before making this a message.")
+      fields$from_lifeline_id <- if (is.na(step$from_lifeline_id)) lifelines[1] else step$from_lifeline_id
+      fields$to_lifeline_id <- if (is.na(step$to_lifeline_id)) lifelines[min(2L, length(lifelines))] else step$to_lifeline_id
+    }
+    if (value == "fragment_open" && is.na(step$fragment_kind)) fields$fragment_kind <- "opt"
+  }
   write_seq_step(con, step_id, fields, note = "Edited step")
 }
 

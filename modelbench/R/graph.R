@@ -74,6 +74,21 @@ impact_edges <- function(con) {
 
   machines <- q("SELECT id, owner_element_id FROM state_machine")
   add(node_id("element", machines$owner_element_id), node_id("state_machine", machines$id), both = TRUE)
+  # The parts of a machine reach it, so a changed transition or state shows its machine.
+  parts <- q("SELECT 'sm_transition' AS kind, id, sm_id FROM sm_transition UNION ALL SELECT 'sm_state', id, sm_id FROM sm_state UNION ALL SELECT 'sm_event', id, sm_id FROM sm_event")
+  add(node_id(parts$kind, parts$id), node_id("state_machine", parts$sm_id))
+
+  # Failure modes reach what they're about, and what detects and handles them (review D6).
+  modes <- q("SELECT f.id, f.subject_kind, f.subject_id, p.element_id FROM failure_mode f LEFT JOIN port p ON f.subject_kind = 'port' AND p.id = f.subject_id")
+  subject <- ifelse(modes$subject_kind == "port", node_id("element", modes$element_id),
+                    ifelse(modes$subject_kind == "sm_state", node_id("sm_state", modes$subject_id), node_id(modes$subject_kind, modes$subject_id)))
+  # Impact runs from cause to effect: a change to what fails, or to what detects or handles
+  # it, reaches the failure mode; a change to a host reaches the software on it.
+  add(subject, node_id("failure_mode", modes$id))
+  failure_links <- q("SELECT source_id, target_kind, target_id FROM link WHERE source_kind = 'failure_mode' AND link_type IN ('detected_by', 'handled_by')")
+  add(node_id(failure_links$target_kind, failure_links$target_id), node_id("failure_mode", failure_links$source_id))
+  hosting <- q("SELECT source_id, target_id FROM link WHERE link_type = 'hosted_on'")
+  add(node_id("element", hosting$target_id), node_id("element", hosting$source_id))
 
   rows <- do.call(rbind, store$edges)
   rows <- unique(rows)
@@ -95,6 +110,8 @@ impact_node_label <- function(con, node) {
          test_case = sprintf("%s %s", id, data$name),
          property_value = entity_title(con, kind, id, data),
          connector = if (is.na(data$label)) id else data$label,
+         failure_mode = entity_title(con, kind, id, data),
+         sm_transition = entity_title(con, kind, id, data),
          if (!is.null(data$name)) data$name else id)
 }
 

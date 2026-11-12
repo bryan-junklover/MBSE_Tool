@@ -15,10 +15,42 @@ baseline_blockers <- function(con) {
   )
 }
 
+# What doesn't block a baseline but should be seen before taking one. Each row is a kind
+# and a line in words. The list is written into the baseline's note when it's taken.
+baseline_warnings <- function(con) {
+  rows <- list()
+  add <- function(kind, text) if (length(text) > 0L) rows[[length(rows) + 1L]] <<- data.frame(kind = kind, text = text)
+  budgets <- budget_status(con)
+  add("budget", sprintf("%s over %s is over its limit: %s.", budgets$label[!budgets$pass], budgets$scope_name[!budgets$pass], budgets$text[!budgets$pass]))
+  incomplete <- !is.na(budgets$note) & grepl("^excludes", budgets$note)
+  add("budget", sprintf("%s over %s leaves out values still to be set (%s).", budgets$label[incomplete], budgets$scope_name[incomplete], budgets$note[incomplete]))
+  analyses <- analysis_status(con)
+  missed <- analyses[!analyses$pass, , drop = FALSE]
+  add("analysis", vapply(seq_len(nrow(missed)), function(i) sprintf("%s misses its limit: %s.", term_to_title(missed$analysis[i]), missed$text[i]), ""))
+  for (sm in DBI::dbGetQuery(con, "SELECT id FROM state_machine ORDER BY id")$id) {
+    checks <- live_assertions(con, sm)
+    add("assertion", sprintf("Assertion %s fails: %s", checks$id[checks$live_result != "pass"], checks$live_message[checks$live_result != "pass"]))
+    pairs <- unhandled_pairs(con, sm)
+    if (nrow(pairs) > 0L) add("state_machine", sprintf("%s has %d event/state pair%s nothing handles.", read_entity(con, "state_machine", sm)$name, nrow(pairs), if (nrow(pairs) == 1L) "" else "s"))
+  }
+  findings <- failure_findings(con)
+  open <- findings$rule %in% c("open_response", "handled_unlinked", "handled_unverified")
+  add("failure", findings$text[open])
+  unallocated <- DBI::dbGetQuery(con, "SELECT id FROM v_unallocated_requirements ORDER BY id")$id
+  if (length(unallocated) > 0L) add("requirement", sprintf("%d committed requirement%s %s allocated to nothing: %s.", length(unallocated),
+                                                         if (length(unallocated) == 1L) "" else "s", if (length(unallocated) == 1L) "is" else "are", paste(unallocated, collapse = ", ")))
+  do.call(rbind, c(list(data.frame(kind = character(0), text = character(0))), rows))
+}
+
 # Refused while blockers exist: returns them, and writes nothing.
-create_baseline <- function(con, name, note = NULL, author = "engineer") {
+# Warnings don't stop it; they're recorded in the note as what was known when it was taken.
+create_baseline <- function(con, name, note = NULL, author = "engineer", warnings = baseline_warnings(con)) {
   blockers <- baseline_blockers(con)
   if (nrow(blockers) > 0L) return(list(ok = FALSE, blockers = blockers))
+  if (nrow(warnings) > 0L) {
+    known <- paste(c(sprintf("Taken with %d known issue%s:", nrow(warnings), if (nrow(warnings) == 1L) "" else "s"), paste0("- ", warnings$text)), collapse = "\n")
+    note <- if (is.null(note) || !nzchar(trimws(note))) known else paste(trimws(note), known, sep = "\n\n")
+  }
   in_tx(con, {
     id <- allocate_id(con, "BL")
     .write_baseline_items(con, id, name, if (is.null(note)) NA_character_ else note, author)
@@ -64,6 +96,29 @@ entity_title <- function(con, kind, id, data) {
       sprintf("%s · %s", if (length(owner) == 1L) owner else data$owner_id, if (length(label) == 1L) label else id)
     },
     requirement = if (is.null(data$short_title)) id else sprintf("%s · %s", id, data$short_title),
+    failure_mode = sprintf("%s · %s %s", id, failure_subject_label(con, data$subject_kind, data$subject_id, if (is.null(data$field_name)) NA_character_ else data$field_name),
+                           tolower(FAILURE_CAUSES[[data$cause_kind]])),
+    link = {
+      name_of <- function(kind, ref) {
+        name <- tryCatch(read_entity(con, kind, ref)$name, error = function(e) NULL)
+        if (is.null(name) || is.na(name)) ref else name
+      }
+      sprintf("%s %s %s", name_of(data$source_kind, data$source_id), gsub("_", " ", data$link_type), name_of(data$target_kind, data$target_id))
+    },
+    budget = {
+      label <- DBI::dbGetQuery(con, "SELECT label FROM property_def WHERE id = ?", params = list(data$property_def_id))$label
+      scope <- DBI::dbGetQuery(con, "SELECT name FROM element WHERE id = ?", params = list(data$scope_element_id))$name
+      sprintf("%s budget over %s", if (length(label) == 1L) label else data$property_def_id, if (length(scope) == 1L) scope else data$scope_element_id)
+    },
+    sm_transition = {
+      state_name <- function(ref) {
+        row <- DBI::dbGetQuery(con, "SELECT name FROM sm_state WHERE id = ?", params = list(ref))
+        if (nrow(row) == 1L) row$name else ref
+      }
+      event <- DBI::dbGetQuery(con, "SELECT name FROM sm_event WHERE id = ?", params = list(data$event_id))$name
+      sprintf("%s → %s → %s", state_name(data$from_state_id), if (length(event) == 1L) event else data$event_id, state_name(data$to_state_id))
+    },
+    failure_waiver = sprintf("Set aside: %s", FAILURE_RULES[[strsplit(id, "|", fixed = TRUE)[[1]][1]]]),
     interface_field = {
       interface <- DBI::dbGetQuery(con, "SELECT name FROM interface WHERE id = ?", params = list(data$interface_id))$name
       sprintf("%s · %s", if (length(interface) == 1L) interface else data$interface_id, data$name)
@@ -137,6 +192,10 @@ compare_baselines <- function(con, a, b = "working") {
   sets <- unique(vapply(entities, function(e) e$change_set, ""))
   lapply(sets, function(set) {
     members <- Filter(function(e) identical(e$change_set, set), entities)
+    # Lead with what the user acted on: a component over the links and ports that went with it.
+    lead <- c("element", "requirement", "interface", "scenario", "state_machine", "failure_mode", "budget", "property_def", "test_case")
+    rank <- match(vapply(members, function(e) e$kind, ""), lead)
+    members <- members[order(ifelse(is.na(rank), length(lead) + 1L, rank))]
     first <- members[[1]]
     list(change_set = set, title = first$title, kind = first$kind, status = first$status, change_text = first$change_text, note = first$note,
          changed_by = first$changed_by, changed_at = first$changed_at, entities = members)
@@ -155,11 +214,6 @@ rollback_to_baseline <- function(con, baseline_id, author = "engineer") {
     entities <- compare_entities(con, baseline_id, "working")
     change_set <- new_change_set(con)
     note <- sprintf("Rollback to %s", baseline_id)
-    additions <- Filter(function(e) e$status == "added", entities)
-    additions <- additions[order(-restore_order(vapply(additions, function(e) e$kind, "")))]
-    for (entity in additions) {
-      if (!is.null(read_entity(con, entity$kind, entity$id))) delete_entity(con, entity$kind, entity$id, author, note, change_set)
-    }
     restores <- Filter(function(e) e$status != "added", entities)
     restores <- restores[order(restore_order(vapply(restores, function(e) e$kind, "")))]
     # A restored parent goes in before its children.
@@ -178,6 +232,29 @@ rollback_to_baseline <- function(con, baseline_id, author = "engineer") {
     for (entity in restores) {
       data <- revision_data(con, entity$kind, entity$id, entity$rev_a)
       write_entity(con, entity$kind, entity$id, restorable_fields(entity$kind, data), author, note, change_set)
+    }
+    # Additions go last: until the rest is put back, kept items may still point at them, such
+    # as a component moved under a parent added since the baseline.
+    additions <- Filter(function(e) e$status == "added", entities)
+    additions <- additions[order(-restore_order(vapply(additions, function(e) e$kind, "")))]
+    taken_at <- DBI::dbGetQuery(con, "SELECT created_at FROM baseline WHERE id = ?", params = list(baseline_id))$created_at
+    for (entity in additions) {
+      if (is.null(read_entity(con, entity$kind, entity$id))) next
+      # Drafts aren't baselined, so one committed since looks added. Put it back to the
+      # draft it was then (review D5).
+      if (entity$kind == "requirement") {
+        # It isn't in the baseline, so it wasn't committed then: its latest draft revision
+        # from no later than the baseline is what it was.
+        then <- DBI::dbGetQuery(con, "SELECT data_json FROM revision WHERE entity_kind = 'requirement' AND entity_id = ? AND changed_at <= ?
+                                         AND deleted = 0 AND json_extract(data_json, '$.status') = 'draft'
+                                       ORDER BY rev DESC LIMIT 1", params = list(entity$id, taken_at))
+        if (nrow(then) == 1L) {
+          data <- jsonlite::fromJSON(then$data_json, simplifyVector = FALSE)
+          write_entity(con, "requirement", entity$id, restorable_fields("requirement", data), author, note, change_set)
+          next
+        }
+      }
+      delete_entity(con, entity$kind, entity$id, author, note, change_set)
     }
     list(safety = safety, change_set = change_set, area = "baseline", changed = length(entities))
   })

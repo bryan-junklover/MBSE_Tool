@@ -74,6 +74,7 @@ commit_requirement <- function(con, text, id = NULL, fields = list(), author = "
 
 # Drafts may fail the gate and hold placeholders. A committed requirement can't go back to draft.
 save_draft <- function(con, text, id = NULL, fields = list(), author = "engineer", note = NULL) {
+  if (is.null(text) || !nzchar(trimws(text))) refuse("Write something before saving a draft.")
   if (!is.null(id)) {
     existing <- read_entity(con, "requirement", id)
     if (!is.null(existing) && identical(existing$status, "committed")) {
@@ -85,6 +86,50 @@ save_draft <- function(con, text, id = NULL, fields = list(), author = "engineer
 }
 
 # Inspector edits: only the fields that actually changed make a revision.
+# Retires a committed requirement. It leaves the specification, the gate counts and
+# Health, but its history and baselines keep it, and Undo brings it back.
+deprecate_requirement <- function(con, id, reason, author = "engineer") {
+  row <- read_entity(con, "requirement", id)
+  if (is.null(row)) refuse("There's no requirement ", id, ".")
+  if (row$status != "committed") refuse(id, " isn't committed. A draft can be deleted instead.")
+  if (is.null(reason) || !nzchar(trimws(reason))) refuse("Say why ", id, " is being deprecated.")
+  write_requirement(con, id, list(status = "deprecated"), author, paste("Deprecated:", trimws(reason)))
+}
+
+# Traces between requirements outside the parent tree: one derived from, or refining, another.
+link_requirements <- function(con, link_type, source_id, target_id, author = "engineer") {
+  if (!link_type %in% c("derives_from", "refines")) refuse("Requirements link as derives from or refines.")
+  if (identical(source_id, target_id)) refuse("A requirement can't trace to itself.")
+  if (is.null(read_entity(con, "requirement", target_id))) refuse("That requirement isn't in the model.")
+  write_link(con, fields = list(link_type = link_type, source_kind = "requirement", source_id = source_id,
+                                target_kind = "requirement", target_id = target_id), author = author)
+}
+
+requirement_links <- function(con, requirement_id) {
+  DBI::dbGetQuery(con, "SELECT l.id, l.link_type, l.target_id, r.short_title FROM link l JOIN requirement r ON r.id = l.target_id
+                         WHERE l.source_kind = 'requirement' AND l.source_id = ? AND l.target_kind = 'requirement'
+                           AND l.link_type IN ('derives_from', 'refines') ORDER BY l.link_type, l.target_id", params = list(requirement_id))
+}
+
+LEVEL_ORDER <- c(stakeholder = 1L, system = 2L, subsystem = 3L)
+
+# Records the coach's review of a committed requirement's exact text, without touching the
+# text, so its evidence stays current (review F5).
+mark_requirement_coached <- function(con, id, assessed_text, call_id = NULL, author = "engineer") {
+  row <- read_entity(con, "requirement", id)
+  if (is.null(row)) refuse("There's no requirement ", id, ".")
+  if (!identical(stringr::str_squish(row$text), stringr::str_squish(assessed_text))) refuse("The coach reviewed different text, so ", id, " isn't marked coached.")
+  write_requirement(con, id, list(coach_state = "reviewed", coach_call_id = if (is.null(call_id)) NA else call_id), author, "Coached from Specification")
+}
+
+# Drafts were never part of the specification, so they can simply go.
+delete_draft_requirement <- function(con, id, author = "engineer") {
+  row <- read_entity(con, "requirement", id)
+  if (is.null(row)) refuse("There's no requirement ", id, ".")
+  if (row$status != "draft") refuse(id, " is committed, so it's deprecated rather than deleted. That keeps its history.")
+  delete_entity(con, "requirement", id, author, "Draft deleted")
+}
+
 save_requirement_details <- function(con, id, fields, author = "engineer") {
   allowed <- c("short_title", "parent_id", "level", "req_type", "rationale", "verification_method")
   unknown <- setdiff(names(fields), allowed)
@@ -132,6 +177,11 @@ requirement_table <- function(con) {
              WHERE l.link_type = 'satisfied_by' AND l.source_kind = 'requirement' AND l.source_id = r.id
                AND l.target_kind = 'element') AS allocated_to
       FROM requirement r WHERE r.status <> 'deprecated' ORDER BY r.id")
+  # Scored against the model as it is now, not as it was when saved (review C9).
+  terms <- model_terms(con)
+  live <- lapply(rows$text, function(text) check_requirement(text, terms))
+  rows$gate_score <- vapply(live, function(gate) as.integer(gate$score), 0L)
+  rows$gate_pass <- vapply(live, function(gate) as.integer(isTRUE(gate$passes_gate)), 0L)
   rows
 }
 
@@ -147,7 +197,7 @@ filter_requirements <- function(rows, search = "", type = "all", low_first = FAL
 }
 
 # Findings the gate can state about a saved requirement, in plain words.
-requirement_findings <- function(row, dictionary = EMPTY_TERMS) {
+requirement_findings <- function(row, dictionary = EMPTY_TERMS, parent_level = NULL) {
   gate <- check_requirement(row$text, dictionary)
   findings <- gate_blockers(gate)
   if (isTRUE(gate$warnings$multiple_requirements) && !isTRUE(gate$warnings$multiple_shall)) {
@@ -155,6 +205,9 @@ requirement_findings <- function(row, dictionary = EMPTY_TERMS) {
   }
   if (is.na(row$verification_method)) findings <- c(findings, "No verification method recorded.")
   if (is.na(row$rationale)) findings <- c(findings, "No rationale recorded.")
+  if (!is.null(parent_level) && !is.na(parent_level) && !is.na(row$level) && LEVEL_ORDER[[row$level]] < LEVEL_ORDER[[parent_level]]) {
+    findings <- c(findings, sprintf("A %s requirement sits under a %s one: a child is usually at its parent's level or below.", row$level, parent_level))
+  }
   list(score = as.integer(gate$score), findings = findings)
 }
 
@@ -235,25 +288,62 @@ read_import_file <- function(path, name = basename(path)) {
 
 # Rows passing the gate become drafts; the engineer still commits each one.
 # The rest wait in the triage queue, one at a time.
+# Columns an export writes, read back on import (review F1). Values that don't fit are left out.
+import_fields <- function(raw_json, level) {
+  raw <- tryCatch(jsonlite::fromJSON(raw_json, simplifyVector = TRUE), error = function(e) list())
+  names(raw) <- gsub("[^a-z]+", "_", tolower(trimws(names(raw))))
+  pick <- function(keys, allowed = NULL) {
+    for (key in keys) {
+      value <- raw[[key]]
+      if (!is.null(value) && length(value) == 1L && !is.na(value) && nzchar(trimws(as.character(value)))) {
+        value <- trimws(as.character(value))
+        if (is.null(allowed) || tolower(value) %in% allowed) return(if (is.null(allowed)) value else tolower(value))
+      }
+    }
+    NULL
+  }
+  fields <- list(level = pick("level", c("stakeholder", "system", "subsystem")),
+                 req_type = pick(c("type", "req_type"), c("functional", "performance", "physical", "interface", "nfr", "constraint")),
+                 verification_method = pick(c("verify_by", "verification_method", "verification"), c("test", "analysis", "inspection", "demonstration", "simulation")),
+                 short_title = pick(c("short_title", "title")),
+                 rationale = pick("rationale"))
+  if (is.null(fields$level)) fields$level <- level
+  Filter(Negate(is.null), fields)
+}
+
+# The only thing holding a row back is a number still to decide: that's a fine draft.
+only_placeholder_blocks <- function(gate) {
+  blockers <- gate_blockers(gate)
+  length(blockers) > 0L && all(grepl("placeholder", blockers, ignore.case = TRUE))
+}
+
 import_requirements <- function(con, rows, source_name, level = "system", author = "engineer") {
   dictionary <- model_terms(con)
+  existing <- stringr::str_squish(DBI::dbGetQuery(con, "SELECT text FROM requirement WHERE status <> 'deprecated'")$text)
   with_change_set(con, function(change_set) {
     added <- character(0)
     queued <- 0L
+    skipped <- 0L
     for (i in seq_len(nrow(rows))) {
+      # A row already in the specification, as when an export comes back, isn't added again.
+      if (stringr::str_squish(rows$text[i]) %in% existing) {
+        skipped <- skipped + 1L
+        next
+      }
       gate <- check_requirement(rows$text[i], dictionary)
-      if (gate$passes_gate) {
-        written <- save_requirement_text(con, gate, NULL,
-                                         list(status = "draft", level = level, short_title = NULL),
-                                         author, paste("Imported from", source_name))
+      if (gate$passes_gate || only_placeholder_blocks(gate)) {
+        fields <- utils::modifyList(list(status = "draft", short_title = NULL), import_fields(rows$raw_json[i], level))
+        fields <- fields[intersect(names(fields), c("status", "level", "req_type", "verification_method", "short_title", "rationale"))]
+        written <- save_requirement_text(con, gate, NULL, fields, author, paste("Imported from", source_name))
         added <- c(added, written$id)
+        existing <- c(existing, stringr::str_squish(rows$text[i]))
       } else {
         insert_triage_row(con, source_name, rows$row_no[i], rows$text[i], rows$raw_json[i],
                           canonical_json(as.list(gate_blockers(gate))))
         queued <- queued + 1L
       }
     }
-    list(added = added, queued = queued)
+    list(added = added, queued = queued, skipped = skipped, change_set = change_set)
   })
 }
 
@@ -266,7 +356,7 @@ triage_fix <- function(con, triage_id, text, level = "system", author = "enginee
   row <- DBI::dbGetQuery(con, "SELECT * FROM import_triage WHERE id = ?", params = list(triage_id))
   if (nrow(row) == 0L) stop("No triage row ", triage_id, call. = FALSE)
   gate <- check_requirement(text, model_terms(con))
-  if (!gate$passes_gate) refuse("Still failing the gate: ", paste(gate_blockers(gate), collapse = " "))
+  if (!gate$passes_gate && !only_placeholder_blocks(gate)) refuse("Still failing the gate: ", paste(gate_blockers(gate), collapse = " "))
   in_tx(con, {
     written <- save_requirement_text(con, gate, NULL, list(status = "draft", level = level), author,
                                      paste("Imported from", row$source_name, "after a fix"))

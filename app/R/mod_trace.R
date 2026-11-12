@@ -1,28 +1,36 @@
 # Write › Traceability: requirements × components, and functions × components.
 
-mod_trace_ui <- function(id) {
+mod_trace_ui <- function(id, tabs = NULL) {
   ns <- shiny::NS(id)
   shiny::tagList(
-    shiny::tags$div(class = "mb-tabbar", shiny::uiOutput(ns("tabs"))),
+    screen_bar(tabs, shiny::uiOutput(ns("tabs"))),
     shiny::tags$div(
       class = "mb-body",
-      shiny::tags$main(class = "mb-main", shiny::uiOutput(ns("matrix")),
+      shiny::tags$main(class = "mb-main mb-matrix-main", shiny::uiOutput(ns("coverage")),
+                       shiny::uiOutput(ns("matrix"), class = "mb-matrix-scroll"),
                        shiny::tags$div(class = "mb-legend", shiny::tags$span("■ linked"), shiny::tags$span("▪ linked to a part of it"),
                                        shiny::tags$span(class = "mb-gap", "shaded amber = gap"), shiny::tags$span("shaded grey = draft"),
                                        shiny::tags$span(style = "color:var(--ai-text)", "dashed = AI candidate, not yet chosen"))),
-      shiny::tags$aside(class = "mb-right", shiny::uiOutput(ns("coverage")), shiny::uiOutput(ns("side")))
+      # Opens when a row is chosen, so the matrix has the width until then (§3).
+      side_column("right", "trace.side", "Allocation", width = 360, auto = TRUE, shiny::uiOutput(ns("side")))
     )
   )
 }
 
 # Column heads and cells are real buttons. A cell says what it holds in its label, not only its look.
 render_trace_table <- function(rows, columns, cell_of, row_class, row_label, select_input, selected) {
-  shiny::tags$div(class = "mb-table", shiny::tags$table(
+  # Heads are turned 45°, so a long name takes height, not width; the head row and the
+  # first column stay in view while the matrix scrolls (UX review §2.8).
+  shiny::tags$div(class = "mb-table mb-matrix-wrap", shiny::tags$table(
     class = "mb-simple mb-matrix",
     shiny::tags$thead(shiny::tags$tr(
-      shiny::tags$th("Requirement"),
+      # Each turned name leans over the heads to its right, and sticky heads are opaque, so
+      # every head sits above the ones after it, and the corner above them all.
+      shiny::tags$th(class = "mb-matrix-corner", style = sprintf("z-index:%d", nrow(columns) + 4L), "Requirement"),
       lapply(seq_len(nrow(columns)), function(j) {
-        shiny::tags$th(class = if (isTRUE(columns$empty[j])) "mb-gap-row mb-gap", columns$name[j])
+        shiny::tags$th(class = paste("mb-rot", if (isTRUE(columns$empty[j])) "mb-gap"), title = columns$name[j],
+                       style = sprintf("z-index:%d", nrow(columns) - j + 3L),
+                       shiny::tags$div(shiny::tags$span(columns$name[j])))
       })
     )),
     shiny::tags$tbody(lapply(seq_len(nrow(rows)), function(i) {
@@ -118,20 +126,18 @@ mod_trace_server <- function(id, state) {
     })
 
     output$coverage <- shiny::renderUI({
-      if (tab() != "requirements") {
+      item <- function(label, a, b) shiny::tags$span(class = if (a < b) "mb-gap", sprintf("%s %d / %d", label, a, b))
+      line <- if (tab() != "requirements") {
         data <- allocation_data()
-        return(shiny::tags$section(class = "mb-card", shiny::tags$b("Coverage"),
-                                   shiny::tags$div(class = "mb-card-rows", shiny::tags$span("Functions allocated"),
-                                                   shiny::tags$span(class = "mono", sprintf("%d / %d", sum(!data$rows$unallocated), nrow(data$rows)))),
-                                   shiny::tags$span(class = "mb-caption", "All counts computed directly from the model.")))
+        list(item("Functions allocated", sum(!data$rows$unallocated), nrow(data$rows)))
+      } else {
+        coverage <- matrix_data()$coverage
+        list(item("Requirements allocated", coverage$allocated, coverage$allocatable),
+             item("Components with requirements", coverage$components, coverage$component_total),
+             item("With a verification method", coverage$verified, coverage$allocatable))
       }
-      coverage <- matrix_data()$coverage
-      row <- function(label, a, b) list(shiny::tags$span(label), shiny::tags$span(class = "mono", sprintf("%d / %d", a, b)))
-      shiny::tags$section(class = "mb-card", shiny::tags$b("Coverage"),
-                          shiny::tags$div(class = "mb-card-rows", c(row("Requirements allocated", coverage$allocated, coverage$allocatable),
-                                                                    row("Components with requirements", coverage$components, coverage$component_total),
-                                                                    row("Requirements with verification method", coverage$verified, coverage$allocatable))),
-                          shiny::tags$span(class = "mb-caption", "All counts computed directly from the model."))
+      shiny::tags$div(class = "mb-facts", shiny::tags$b(style = "font-family:var(--font-sans)", "Coverage"), line,
+                      shiny::tags$span(class = "mb-caption", "counted from the model · select a row to ask the AI · click a cell to link or unlink"))
     })
 
     coach_task <- shiny::ExtendedTask$new(function(connection, kind, target) run_link_coach_async(connection, kind, target))
@@ -151,6 +157,7 @@ mod_trace_server <- function(id, state) {
       )
     })
     shiny::observeEvent(input$select, selected(input$select))
+    shiny::observe(reveal_column(session, "side", !is.null(selected())))
     shiny::observeEvent(input$ask_coach, {
       coach_message(NULL)
       coach_task$invoke(con(), if (tab() == "requirements") "requirement" else "element", selected())

@@ -1,4 +1,4 @@
-WORKSPACES <- c("Project", "Write", "Model", "Behavior", "Analyze")
+WORKSPACES <- c("Project", "Write", "Model", "Behavior", "Analyze", "Help")
 
 # Fingerprinted so a changed stylesheet can't be served stale (a Coach lesson).
 asset_url <- function(file) {
@@ -19,11 +19,38 @@ app_theme <- function() {
   )
 }
 
+# The installed and the loaded version of a package, when they differ. An R session that
+# loaded the diagram widget before it was reinstalled keeps the old version, and htmlwidgets
+# names the script URL after it, so the browser goes on running its cached old script.
+stale_package <- function(pkg) {
+  if (!isNamespaceLoaded(pkg)) return(NULL)
+  installed <- unname(read.dcf(file.path(find.package(pkg), "DESCRIPTION"), fields = "Version")[1, 1])
+  loaded <- getNamespaceVersion(pkg)[[1]]
+  if (identical(installed, loaded)) NULL else list(loaded = loaded, installed = installed)
+}
+
+# Attaches a package, first reloading it if this session holds an older version.
+use_current_package <- function(pkg) {
+  stale <- stale_package(pkg)
+  if (!is.null(stale)) {
+    message(sprintf("%s %s is loaded but %s is installed; reloading it.", pkg, stale$loaded, stale$installed))
+    if (paste0("package:", pkg) %in% search()) detach(paste0("package:", pkg), character.only = TRUE)
+    reloaded <- tryCatch({
+      unloadNamespace(pkg)
+      TRUE
+    }, error = function(e) FALSE)
+    if (!reloaded) stop(sprintf("%s %s is still loaded in this R session. Restart R, then run the app again.", pkg, stale$loaded), call. = FALSE)
+  }
+  library(pkg, character.only = TRUE)
+}
+
 phase_placeholder <- function(what, phase) {
   shiny::tags$div(class = "mb-placeholder", sprintf("%s arrives in Phase %d.", what, phase))
 }
 
 app_ui <- function() {
+  # Each screen carries its workspace's tab bar, drawn for that screen, in its own bar.
+  screen <- function(workspace, tab, ui, ...) bslib::nav_panel_hidden(tab, ui(..., tabs = render_tab_bar(workspace, tab)))
   bslib::page_fillable(
     theme = app_theme(), padding = 0, gap = 0, fillable_mobile = FALSE, title = "ModelBench",
     shiny::tags$head(
@@ -33,7 +60,7 @@ app_ui <- function() {
       shiny::tags$script(src = asset_url("app.js"))
     ),
     shiny::tags$div(
-      style = "display:block;overflow:auto",
+      class = "mb-frame",
       shiny::tags$header(
         class = "mb-topbar",
         shiny::tags$div(class = "mb-brand",
@@ -45,49 +72,56 @@ app_ui <- function() {
                            onclick = "mbToggleChat()", "Ask the model")
       ),
       shiny::uiOutput("status_strip"),
+      shiny::uiOutput("return_bar"),
       bslib::navset_hidden(
         id = "workspace", selected = "Write",
         bslib::nav_panel_hidden("Project", mod_project_ui("project")),
         bslib::nav_panel_hidden(
           "Write",
-          shiny::tags$div(class = "mb-tabbar", shiny::uiOutput("write_tabs")),
           bslib::navset_hidden(
             id = "write_tab", selected = "Draft",
-            bslib::nav_panel_hidden("Draft", mod_write_ui("write")),
-            bslib::nav_panel_hidden("Specification", mod_spec_ui("spec")),
-            bslib::nav_panel_hidden("Traceability", mod_trace_ui("trace"))
+            screen("Write", "Draft", mod_write_ui, "write"),
+            screen("Write", "Specification", mod_spec_ui, "spec"),
+            screen("Write", "Traceability", mod_trace_ui, "trace")
           )
         ),
         bslib::nav_panel_hidden(
           "Model",
-          shiny::tags$div(class = "mb-tabbar", shiny::uiOutput("model_tabs")),
           bslib::navset_hidden(
             id = "model_tab", selected = "Structure",
-            bslib::nav_panel_hidden("Structure", mod_model_ui("model")),
-            bslib::nav_panel_hidden("Flows", mod_model_ui("flows", "flows")),
-            bslib::nav_panel_hidden("Functional", mod_model_ui("functional", "functional")),
-            bslib::nav_panel_hidden("Interfaces", mod_interfaces_ui("interfaces")),
-            bslib::nav_panel_hidden("Stakeholder", mod_stakeholder_ui("stakeholder"))
+            screen("Model", "Structure", mod_model_ui, "model"),
+            screen("Model", "Flows", mod_model_ui, "flows", "flows"),
+            screen("Model", "Functional", mod_model_ui, "functional", "functional"),
+            screen("Model", "Interfaces", mod_interfaces_ui, "interfaces"),
+            screen("Model", "Stakeholder", mod_stakeholder_ui, "stakeholder")
           )
         ),
         bslib::nav_panel_hidden(
           "Behavior",
-          shiny::tags$div(class = "mb-tabbar", shiny::uiOutput("behavior_tabs")),
           bslib::navset_hidden(
             id = "behavior_tab", selected = "Scenarios",
-            bslib::nav_panel_hidden("Scenarios", mod_scenarios_ui("scenarios")),
-            bslib::nav_panel_hidden("State machines", mod_machines_ui("machines")),
-            bslib::nav_panel_hidden("Behavioral impact", mod_behavior_impact_ui("behavior_impact"))
+            screen("Behavior", "Scenarios", mod_scenarios_ui, "scenarios"),
+            screen("Behavior", "State machines", mod_machines_ui, "machines"),
+            screen("Behavior", "Failure modes", mod_failures_ui, "failures"),
+            screen("Behavior", "Behavioral impact", mod_behavior_impact_ui, "behavior_impact")
           )
         ),
         bslib::nav_panel_hidden(
           "Analyze",
-          shiny::tags$div(class = "mb-tabbar", shiny::uiOutput("analyze_tabs")),
           bslib::navset_hidden(
             id = "analyze_tab", selected = "Health",
-            bslib::nav_panel_hidden("Health", mod_health_ui("health")),
-            bslib::nav_panel_hidden("Review queue", mod_review_ui("review")),
-            bslib::nav_panel_hidden("Baselines & impact", mod_baselines_ui("baselines"))
+            screen("Analyze", "Health", mod_health_ui, "health"),
+            screen("Analyze", "Review queue", mod_review_ui, "review"),
+            screen("Analyze", "Baselines & impact", mod_baselines_ui, "baselines"),
+            screen("Analyze", "Documents", mod_documents_ui, "documents")
+          )
+        ),
+        bslib::nav_panel_hidden(
+          "Help",
+          bslib::navset_hidden(
+            id = "help_tab", selected = "User guide",
+            screen("Help", "User guide", mod_help_ui, "help_guide", "USER_GUIDE.md"),
+            screen("Help", "How-to", mod_help_ui, "help_howto", "HOW_TO.md")
           )
         )
       )
@@ -99,10 +133,18 @@ app_ui <- function() {
 WORKSPACE_TABS <- list(
   Write = c("Draft", "Specification", "Traceability"),
   Model = c("Structure", "Flows", "Functional", "Interfaces", "Stakeholder"),
-  Behavior = c("Scenarios", "State machines", "Behavioral impact"),
-  Analyze = c("Health", "Review queue", "Baselines & impact")
+  Behavior = c("Scenarios", "State machines", "Failure modes", "Behavioral impact"),
+  Analyze = c("Health", "Review queue", "Baselines & impact", "Documents"),
+  Help = c("User guide", "How-to")
 )
-TAB_SETS <- c(Write = "write_tab", Model = "model_tab", Behavior = "behavior_tab", Analyze = "analyze_tab")
+TAB_SETS <- c(Write = "write_tab", Model = "model_tab", Behavior = "behavior_tab", Analyze = "analyze_tab", Help = "help_tab")
+
+render_return_bar <- function(back, back_input, dismiss_input) {
+  shiny::tags$div(class = "mb-returnbar", role = "note",
+                  shiny::tags$span(class = "mb-caption", sprintf("From %s:", back$from$tab)), shiny::tags$span(back$label),
+                  shiny::tags$button(type = "button", class = "mb-linkish", onclick = event_js(back_input, "back"), sprintf("Back to %s", tolower(back$from$tab))),
+                  shiny::tags$button(type = "button", class = "mb-btn mb-btn-small mb-push", onclick = event_js(dismiss_input, "dismiss"), "Dismiss"))
+}
 
 render_tab_bar <- function(workspace, active) {
   tabs <- setdiff(WORKSPACE_TABS[[workspace]], "Stakeholder")
@@ -143,15 +185,27 @@ app_server <- function(input, output, session) {
     # Checks the local server every so often, with a short timeout.
     shiny::invalidateLater(30000)
     render_status_strip(status_counts(state$con()), "nav_click", coach_status(state$con()), ai_usage_today(state$con()),
-                        get_setting(state$con(), "coaching_policy", "tiered"))
+                        get_setting(state$con(), "coaching_policy", "tiered"), state$commands())
   })
+  shiny::observeEvent(input$global_undo, run_command(state, undo_command))
+  shiny::observeEvent(input$global_redo, run_command(state, redo_command))
   output$top_nav <- shiny::renderUI(render_top_nav(state$nav()$workspace, "nav_click"))
   # The tab last used in each workspace, kept when moving between them.
-  tabs <- shiny::reactiveVal(list(Write = "Draft", Model = "Structure", Behavior = "Scenarios", Analyze = "Health"))
-  output$write_tabs <- shiny::renderUI(render_tab_bar("Write", tabs()$Write))
-  output$model_tabs <- shiny::renderUI(render_tab_bar("Model", tabs()$Model))
-  output$behavior_tabs <- shiny::renderUI(render_tab_bar("Behavior", tabs()$Behavior))
-  output$analyze_tabs <- shiny::renderUI(render_tab_bar("Analyze", tabs()$Analyze))
+  tabs <- shiny::reactiveVal(list(Write = "Draft", Model = "Structure", Behavior = "Scenarios", Analyze = "Health", Help = "User guide"))
+
+  # The way back after a jump, shown on the screen the jump went to (UX review §2.26).
+  output$return_bar <- shiny::renderUI({
+    back <- state$return_to()
+    here <- state$nav()
+    if (is.null(back) || !identical(here$workspace, back$at$workspace) || !identical(tabs()[[here$workspace]], back$at$tab)) return(NULL)
+    render_return_bar(back, "return_back", "return_dismiss")
+  })
+  shiny::observeEvent(input$return_back, {
+    back <- state$return_to()
+    state$return_to(NULL)
+    if (!is.null(back)) apply_nav(back$from)
+  })
+  shiny::observeEvent(input$return_dismiss, state$return_to(NULL))
 
   apply_nav <- function(target) {
     if (!target$workspace %in% WORKSPACES) return(invisible(NULL))
@@ -197,9 +251,11 @@ app_server <- function(input, output, session) {
   mod_health_server("health", state)
   mod_review_server("review", state)
   mod_baselines_server("baselines", state)
+  mod_documents_server("documents", state)
   mod_stakeholder_server("stakeholder", state)
   mod_scenarios_server("scenarios", state)
   mod_machines_server("machines", state)
+  mod_failures_server("failures", state)
   mod_behavior_impact_server("behavior_impact", state)
   mod_ai_settings_server("ai_settings", state)
   mod_chat_server("chat_panel", state)

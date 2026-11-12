@@ -10,6 +10,12 @@ HTMLWidgets.widget({
     var MONO = "IBM Plex Mono, ui-monospace, monospace", SANS = "IBM Plex Sans, system-ui, sans-serif";
     var FLOW_STYLES = { data: { stroke: "#45484D", width: 2 }, energy: { stroke: INK, width: 4 }, matter: { stroke: LINE, width: 2, dash: "6 4" } };
     var BLOCK_W = 180, BLOCK_H = 76, BOUNDARY_W = 110, BOUNDARY_H = 34;
+    // Zoom limits, the margin kept round the content, and the zoom below which edge
+    // labels are hidden because they can no longer be read.
+    var MIN_SCALE = 0.4, MAX_SCALE = 2, PAD = 40, LABEL_SCALE = 0.55;
+    // Fit stops here in editable behaviour views: below it state and action names are too
+    // small to read, so the view scrolls instead (UX re-review R3).
+    var BEHAVIOUR_FIT_FLOOR = 0.7;
 
     function portGroup(position) {
       return {
@@ -18,9 +24,12 @@ HTMLWidgets.widget({
         markup: [{ tagName: "rect", selector: "portBody" }]
       };
     }
+    // The outline sits outside the body, so selection never hides a gap or sketch border.
+    var OUTLINE = { x: -5, y: -5, width: "calc(w+10)", height: "calc(h+10)", rx: 6, ry: 6, fill: "none", stroke: "none", strokeWidth: 2, pointerEvents: "none" };
     var Block = dia.Element.define("mb.Block", {
       size: { width: BLOCK_W, height: BLOCK_H },
       attrs: {
+        outline: OUTLINE,
         body: { width: "calc(w)", height: "calc(h)", fill: "#FFFFFF", stroke: LINE, strokeWidth: 1, rx: 4, ry: 4 },
         stereotype: { x: "calc(0.5*w)", y: 22, textAnchor: "middle", fontFamily: MONO, fontSize: 11, fill: "#5B5E63" },
         name: { x: "calc(0.5*w)", y: 44, textAnchor: "middle", fontFamily: SANS, fontSize: 13, fontWeight: 600, fill: INK, textWrap: { width: -16, maxLineCount: 2, ellipsis: true } },
@@ -28,33 +37,76 @@ HTMLWidgets.widget({
       },
       ports: { groups: { top: portGroup("top"), right: portGroup("right"), bottom: portGroup("bottom"), left: portGroup("left") } }
     }, {
-      markup: [{ tagName: "rect", selector: "body" }, { tagName: "text", selector: "stereotype" }, { tagName: "text", selector: "name" }, { tagName: "text", selector: "note" }]
+      markup: [{ tagName: "rect", selector: "body" }, { tagName: "rect", selector: "outline" }, { tagName: "text", selector: "stereotype" }, { tagName: "text", selector: "name" }, { tagName: "text", selector: "note" }]
     });
     // Decisions in an activity: same attribute names as a block, drawn as a diamond.
     var Diamond = Block.define("mb.Diamond", {
       attrs: { body: { refPoints: "0,10 10,0 20,10 10,20", fill: "#E3E4E6", stroke: "none", width: null, height: null, rx: null, ry: null } }
     }, {
-      markup: [{ tagName: "polygon", selector: "body" }, { tagName: "text", selector: "stereotype" }, { tagName: "text", selector: "name" }, { tagName: "text", selector: "note" }]
+      markup: [{ tagName: "polygon", selector: "body" }, { tagName: "rect", selector: "outline" }, { tagName: "text", selector: "stereotype" }, { tagName: "text", selector: "name" }, { tagName: "text", selector: "note" }]
     });
+    // The Flows environment band. Its own type, so connectors route through it.
+    var Band = Block.define("mb.Band", {});
     var SHAPES = {
       state: { width: 160, height: 60, rx: 20 }, action: { width: 190, height: 60, rx: 16 }, decision: { width: 210, height: 100 },
       merge: { width: 44, height: 44 }, initial: { width: 26, height: 26, rx: 13, solid: true }, final: { width: 26, height: 26, rx: 13, solid: true },
       fork: { width: 130, height: 10, rx: 2, solid: true }, join: { width: 130, height: 10, rx: 2, solid: true }
     };
-    var namespace = { mb: { Block: Block, Diamond: Diamond }, standard: shapes.standard };
+    var namespace = { mb: { Block: Block, Diamond: Diamond, Band: Band }, standard: shapes.standard };
 
     var graph = new dia.Graph({}, { cellNamespace: namespace });
+    el.style.position = "relative";
     var holder = document.createElement("div");
-    holder.style.cssText = "width:100%;height:100%;overflow:auto;background:" + CANVAS + ";outline-offset:-2px";
+    holder.className = "mb-canvas";
+    holder.style.cssText = "position:absolute;inset:0;overflow:auto;background:" + CANVAS + ";outline-offset:-2px";
     holder.tabIndex = 0;
-    holder.setAttribute("aria-label", "Block diagram. Arrow keys move between connected blocks.");
+    holder.setAttribute("aria-label", "Diagram. Arrow keys move between connected blocks. Plus and minus zoom, 0 fits the diagram, 1 shows it at 100%.");
     var mount = document.createElement("div");
+    // Block-level with no line box, so a paper exactly the view's size never adds scrollbars.
+    mount.style.cssText = "display:block;line-height:0";
     holder.appendChild(mount);
     el.appendChild(holder);
 
+    // Zoom controls and a status line, outside the scrolling area so they stay put.
+    var controls = document.createElement("div");
+    controls.className = "mb-zoom";
+    controls.setAttribute("role", "group");
+    controls.setAttribute("aria-label", "Zoom");
+    function control(label, aria, action) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = label;
+      b.setAttribute("aria-label", aria);
+      b.title = aria;
+      b.addEventListener("click", function () { action(); holder.focus({ preventScroll: true }); });
+      controls.appendChild(b);
+      return b;
+    }
+    control("Fit", "Fit the diagram to the view (0)", function () { fitAll(true); });
+    control("−", "Zoom out (−)", function () { zoomBy(1 / 1.2); });
+    var percent = control("100%", "Show at 100% (1)", function () { zoomTo(1); });
+    control("+", "Zoom in (+)", function () { zoomBy(1.2); });
+    el.appendChild(controls);
+    var status = document.createElement("div");
+    status.className = "mb-canvas-status";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    el.appendChild(status);
+    var statusTimer = null;
+    function showStatus(text) {
+      status.textContent = text;
+      status.style.display = text ? "block" : "none";
+      clearTimeout(statusTimer);
+      if (text) statusTimer = setTimeout(function () { status.style.display = "none"; }, 5000);
+    }
+    showStatus("");
+
+    var style = document.createElement("style");
+    style.textContent = ".mb-canvas svg{display:block}";
+    el.appendChild(style);
     var paper = new dia.Paper({
       el: mount, model: graph, width: 1200, height: 800, gridSize: 8, drawGrid: { name: "dot", args: { color: "#D4D5D8", scaleFactor: 2 } },
-      background: { color: CANVAS }, async: false, sorting: dia.Paper.sorting.NONE, cellViewNamespace: namespace,
+      background: { color: CANVAS }, async: false, sorting: dia.Paper.sorting.NONE, cellViewNamespace: namespace, labelsLayer: true,
       linkPinning: false, snapLinks: { radius: 16 }, markAvailable: false,
       defaultLink: function () { return newLink(); },
       validateConnection: function (a, ma, b, mb) { return !!mb && (a !== b || behaviourMode()); },
@@ -63,6 +115,7 @@ HTMLWidgets.widget({
     });
 
     var data = null, tool = "select", selected = [], painted = [], level = null, elk = new ELK(), inputBase = el.id;
+    var scale = 1, origin = { x: 0, y: 0 }, fitted = true, syncing = false;
 
     function newLink() {
       return new shapes.standard.Link({ z: 1, attrs: { line: { stroke: EDGE, strokeWidth: 2, targetMarker: { type: "path", d: "M 8 -4 L 0 0 L 8 4 z", fill: EDGE, stroke: EDGE } } }, connector: { name: "rounded", args: { radius: 6 } } });
@@ -177,6 +230,202 @@ HTMLWidgets.widget({
       }
       return a;
     }
+    // Structure, Flows and Functional route connectors round the blocks at right angles.
+    function routeLink(link) {
+      if (behaviourMode()) return;
+      var side = function (end) {
+        var cell = end.id && graph.getCell(end.id);
+        if (!cell || !end.port || !cell.hasPort(end.port)) return null;
+        return cell.getPort(end.port).group;
+      };
+      var s = side(link.source()), t = side(link.target());
+      // Links leaving the same side of one block each take their own channel (UX re-review P2.7).
+      var lane = function (end, group) {
+        if (!group) return 0;
+        var mates = graph.getLinks().filter(function (other) {
+          var o = other.source(), q = other.target();
+          return (o.id === end.id && side(o) === group) || (q.id === end.id && side(q) === group);
+        }).map(function (other) { return String(other.id); }).sort();
+        return Math.max(0, mates.indexOf(String(link.id)));
+      };
+      var n = Math.min(4, Math.max(lane(link.source(), s), lane(link.target(), t)));
+      link.unset("mbRoute", { silent: true });
+      link.router("mbCached", {
+        step: 8, padding: 16 + 8 * n, maximumLoops: 4000, excludeTypes: ["mb.Band"],
+        startDirections: s ? [s] : ["top", "right", "bottom", "left"],
+        endDirections: t ? [t] : ["top", "right", "bottom", "left"],
+        rev: ++routeRev
+      });
+    }
+    // A routed link keeps the channel separateChannels() gave it until one of its ends moves;
+    // then (mid-drag, say) the manhattan router takes over again.
+    var routeRev = 0;
+    function anchorKey(view) {
+      var a = view.sourceAnchor, b = view.targetAnchor;
+      return a && b ? [a.x, a.y, b.x, b.y].map(Math.round).join(",") : "";
+    }
+    // When the router can't find a way round the blocks it falls back to one bend that cuts
+    // straight through them. Before that, try tighter padding, then any side to leave from.
+    var NO_ROUTE = {}, ALL_SIDES = ["top", "right", "bottom", "left"];
+    joint.routers.mbCached = function (vertices, args, view) {
+      var cached = view.model.get("mbRoute");
+      if (cached && cached.key === anchorKey(view)) return cached.points.map(function (p) { return { x: p.x, y: p.y }; });
+      var tries = [args.padding, 16, 8].filter(function (p, i, all) { return p <= args.padding && all.indexOf(p) === i; })
+        .map(function (p) { return { padding: p }; })
+        .concat([{ padding: 8, startDirections: ALL_SIDES, endDirections: ALL_SIDES }]);
+      for (var i = 0; i < tries.length; i++) {
+        var route = joint.routers.manhattan(vertices, Object.assign({}, args, tries[i], { fallbackRouter: function () { return NO_ROUTE; } }), view);
+        if (route !== NO_ROUTE) return route;
+      }
+      return joint.routers.orthogonal(vertices, {}, view);
+    };
+    function reroute(link) { link.router("mbCached", Object.assign({}, link.router().args, { rev: ++routeRev })); }
+    // The router spaces links out near their blocks only, so two links can still run down one
+    // channel further on. This slides each such run apart, 10 px a link, unless that would put
+    // it through a block.
+    function separateChannels() {
+      if (behaviourMode()) return;
+      var links = graph.getLinks().filter(function (l) { var r = l.router(); return r && r.name === "mbCached"; });
+      var routes = links.map(function (link) {
+        // A kept route may now cross a block that moved; one just routed is current.
+        if (link.get("mbRoute")) {
+          link.unset("mbRoute", { silent: true });
+          reroute(link);
+        }
+        var view = paper.findViewByModel(link);
+        return view && view.route ? view.route.map(function (p) { return { x: p.x, y: p.y }; }) : [];
+      });
+      // Every straight run of every link. A run that ends at a port can't move, but the others
+      // in its channel move off it.
+      var segs = [];
+      var full = links.map(function (link, i) {
+        var view = paper.findViewByModel(link);
+        return view && view.sourceAnchor && view.targetAnchor ? [view.sourceAnchor].concat(routes[i]).concat([view.targetAnchor]) : [];
+      });
+      full.forEach(function (pts, i) {
+        for (var k = 0; k + 1 < pts.length; k++) {
+          var a = pts[k], b = pts[k + 1], vertical = Math.abs(a.x - b.x) < 0.5;
+          if (!vertical && Math.abs(a.y - b.y) >= 0.5) continue;
+          segs.push({ link: i, k: k - 1, fixed: k === 0 || k === pts.length - 2, vertical: vertical, at: vertical ? a.x : a.y,
+                      lo: vertical ? Math.min(a.y, b.y) : Math.min(a.x, b.x), hi: vertical ? Math.max(a.y, b.y) : Math.max(a.x, b.x) });
+        }
+      });
+      var blocks = graph.getElements().filter(function (e) { return !(e instanceof Band); });
+      // Runs filed by direction and position, so each looks only at its neighbours.
+      var lanes = {};
+      var laneKey = function (vertical, at) { return (vertical ? "v" : "h") + Math.floor(at / 8); };
+      var file = function (seg) { (lanes[laneKey(seg.vertical, seg.at)] = lanes[laneKey(seg.vertical, seg.at)] || []).push(seg); };
+      var near = function (vertical, at, reach) {
+        var found = [];
+        for (var b = Math.floor((at - reach) / 8); b <= Math.floor((at + reach) / 8); b++) found = found.concat(lanes[(vertical ? "v" : "h") + b] || []);
+        return found;
+      };
+      segs.forEach(function (seg, n) { seg.n = n; file(seg); });
+      var grouped = {};
+      segs.forEach(function (seg, n) {
+        if (grouped[n]) return;
+        var group = [seg];
+        near(seg.vertical, seg.at, 4).forEach(function (other) {
+          var m = other.n;
+          if (m <= n || grouped[m] || Math.abs(other.at - seg.at) > 4) return;
+          if (group.some(function (g) { return g.link === other.link; })) return;
+          if (!group.some(function (g) { return Math.min(g.hi, other.hi) - Math.max(g.lo, other.lo) > 4; })) return;
+          group.push(other);
+          grouped[m] = true;
+        });
+        if (group.length < 2) return;
+        var fixed = group.filter(function (g) { return g.fixed; }), movable = group.filter(function (g) { return !g.fixed; });
+        movable.sort(function (a, b) { return String(links[a.link].id) < String(links[b.link].id) ? -1 : 1; });
+        var centre = fixed.length > 0 ? fixed[0].at : group.reduce(function (sum, g) { return sum + g.at; }, 0) / group.length;
+        movable.forEach(function (g, j) {
+          var pts = routes[g.link], link = links[g.link];
+          var ends = [link.source().id, link.target().id].map(String);
+          // Stay put when already clear; else the next free slot out from the channel.
+          var candidates = [g.at].concat(fixed.length === 0 ? [centre + (j - (movable.length - 1) / 2) * 10] : []);
+          for (var step = 1; step <= 6; step++) candidates.push(centre + step * 10, centre - step * 10);
+          var fits = function (c) {
+            var crowded = near(g.vertical, c, 9.5).some(function (o) {
+              return o !== g && o.link !== g.link && Math.abs(o.at - c) < 9.5 &&
+                     Math.min(o.hi, g.hi) - Math.max(o.lo, g.lo) > 4;
+            });
+            if (crowded) return false;
+            var a = Object.assign({}, pts[g.k]), b = Object.assign({}, pts[g.k + 1]);
+            if (g.vertical) { a.x = c; b.x = c; } else { a.y = c; b.y = c; }
+            var line = new joint.g.Line(a, b);
+            // A run lying on a block's edge counts as a hit: keep 8 px clear.
+            if (blocks.some(function (e) { return ends.indexOf(String(e.id)) < 0 && e.getBBox().inflate(8).intersectionWithLine(line); })) return false;
+            pts[g.k] = a;
+            pts[g.k + 1] = b;
+            return true;
+          };
+          for (var c = 0; c < candidates.length; c++) {
+            if (fits(candidates[c])) {
+              var old = lanes[laneKey(g.vertical, g.at)];
+              old.splice(old.indexOf(g), 1);
+              g.at = candidates[c];
+              file(g);
+              return;
+            }
+          }
+        });
+      });
+      links.forEach(function (link, i) {
+        var view = paper.findViewByModel(link);
+        if (!view || routes[i].length === 0) return;
+        link.set("mbRoute", { key: anchorKey(view), points: routes[i] }, { silent: true });
+        reroute(link);
+      });
+    }
+    // Moves each edge label along its edge to the spot clear of blocks, other labels and other
+    // links' lines, or, failing that, the one with the least in the way.
+    function placeLabels() {
+      var boxes = graph.getElements().filter(function (e) { return !(e instanceof Band); }).map(function (e) { return e.getBBox().inflate(4); });
+      // Every link's straight runs, filed in a 64 px grid so a label only checks the runs near it.
+      var CELL = 64, grid = {};
+      var cellsOf = function (box, visit) {
+        for (var cx = Math.floor(box.x / CELL); cx <= Math.floor((box.x + box.width) / CELL); cx++) {
+          for (var cy = Math.floor(box.y / CELL); cy <= Math.floor((box.y + box.height) / CELL); cy++) visit(cx + ":" + cy);
+        }
+      };
+      graph.getLinks().forEach(function (link) {
+        var view = paper.findViewByModel(link);
+        if (!view || !view.sourcePoint || !view.targetPoint) return;
+        var pts = [view.sourcePoint].concat(view.route || []).concat([view.targetPoint]);
+        pts.slice(1).forEach(function (p, i) {
+          var line = new joint.g.Line(pts[i], p), entry = { id: String(link.id), line: line };
+          cellsOf(line.bbox(), function (key) { (grid[key] = grid[key] || []).push(entry); });
+        });
+      });
+      var taken = [];
+      var ratios = [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8, 0.15, 0.85, 0.1, 0.9];
+      graph.getLinks().forEach(function (link) {
+        var label = link.labels()[0];
+        if (!label) return;
+        var view = paper.findViewByModel(link);
+        if (!view || !view.getPointAtRatio) return;
+        var w = String(label.attrs.text.text).length * 7.3 + 8, h = 18;
+        var best = null;
+        for (var k = 0; k < ratios.length && !(best && best.cost === 0); k++) {
+          var p = view.getPointAtRatio(ratios[k]);
+          if (!p) continue;
+          var box = new joint.g.Rect(p.x - w / 2, p.y - h / 2, w, h);
+          var cost = 10 * boxes.filter(function (b) { return b.intersect(box); }).length +
+                     5 * taken.filter(function (b) { return b.intersect(box); }).length;
+          var crossed = {};
+          cellsOf(box, function (key) {
+            (grid[key] || []).forEach(function (entry) {
+              if (entry.id === String(link.id) || crossed[entry.id]) return;
+              if (box.intersectionWithLine(entry.line) || box.containsPoint(entry.line.start)) crossed[entry.id] = true;
+            });
+          });
+          cost += Object.keys(crossed).length;
+          if (!best || cost < best.cost) best = { ratio: ratios[k], box: box, cost: cost };
+        }
+        if (!best) return;
+        taken.push(best.box);
+        if (label.position == null || (label.position.distance || label.position) !== best.ratio) link.label(0, { position: { distance: best.ratio } });
+      });
+    }
 
     function build(x) {
       data = x;
@@ -227,28 +476,32 @@ HTMLWidgets.widget({
             link.set("mbWidth", style.width);
           }
         }
-        if (edge.label) link.labels([{ attrs: { text: { text: edge.label, fontFamily: MONO, fontSize: 12, fill: "#45484D" }, rect: { fill: CANVAS, stroke: "none" } }, position: 0.5 }]);
+        if (edge.label) link.labels([{ attrs: { text: { text: edge.label, fontFamily: MONO, fontSize: 12, fill: "#45484D" }, rect: { fill: CANVAS, stroke: "none" } }, position: { distance: 0.5 } }]);
         links.push(link);
       });
-      var sameLevel = level === x.root;
-      var scrollX = sameLevel ? holder.scrollLeft : 0, scrollY = sameLevel ? holder.scrollTop : 0;
-      level = x.root;
+      var key = (x.mode || "") + "|" + (x.root == null ? "" : x.root);
+      var sameLevel = level === key;
+      var scrollX = holder.scrollLeft, scrollY = holder.scrollTop;
+      level = key;
       painted = [];
       // Links go in first, so they sit below the blocks and can't take a drag meant for a
       // port. Sorting by z does the same, but takes 600 ms at 150 components.
       graph.resetCells(links.concat(blocks).concat(boundary));
       placeStubs(links);
       drawBand();
+      links.forEach(routeLink);
       spreadParallel();
-      fit();
+      separateChannels();
+      placeLabels();
       applySelection();
-      if (tool === "select_only") {
-        holder.scrollLeft = 0;
-        holder.scrollTop = 0;
-      } else {
+      // A new level or view opens fitted; an edit to the same one keeps the view still.
+      if (sameLevel && !(fitted && tool === "select_only")) {
+        frame();
         holder.scrollLeft = scrollX;
         holder.scrollTop = scrollY;
-        if (!sameLevel) showBlocks();
+      } else {
+        fitAll(false);
+        if (tool === "select_only") frameFocus();
       }
       if (data.current != null) reveal(data.current);
       var unplaced = x.nodes.filter(function (node) { return node.x == null; });
@@ -264,40 +517,151 @@ HTMLWidgets.widget({
       var top = Infinity, bottom = 0;
       outside.forEach(function (b) { top = Math.min(top, b.position().y); bottom = Math.max(bottom, b.position().y + b.size().height); });
       var box = graph.getBBox();
-      var band = new Block({
+      var band = new Band({
         id: "B:band", position: { x: box.x - 16, y: top - 34 }, size: { width: box.width + 32, height: bottom - top + 50 },
         attrs: { root: { pointerEvents: "none" }, body: { fill: "transparent", stroke: LINE, strokeDasharray: "4 4" },
                  stereotype: { text: "" }, name: { text: "Environment (outside the system)", y: 18, fontWeight: 400, fontSize: 12, fill: "#5B5E63", textWrap: null }, note: { text: "" } }
       });
       graph.addCell(band);
     }
-    // A wide layout can start well off to the side, so open where the blocks are.
-    // Scrolling to the topmost block clipped any block further left, so this uses the
-    // top-left corner of all of them.
-    function showBlocks() {
-      var left = Infinity, top = Infinity;
-      graph.getElements().forEach(function (b) {
-        if (String(b.id).indexOf("B:") === 0) return;
-        left = Math.min(left, b.position().x);
-        top = Math.min(top, b.position().y);
-      });
-      if (left === Infinity) return;
-      var s = paper.scale().sx;
-      holder.scrollLeft = Math.max(0, left * s - 40);
-      holder.scrollTop = Math.max(0, top * s - 40);
+
+    // --- Zoom, fit and the scroll frame ---
+    // The paper is the content's bounding box plus a margin, at the current zoom, and never
+    // smaller than the view. `origin` is the content's top-left in diagram coordinates.
+    function contentBox() {
+      if (graph.getCells().length === 0) return null;
+      var area = paper.getContentArea();
+      return area && area.width > 0 ? area : null;
     }
-    // Scrolls a cell into the middle of the view when any part of it is out of sight.
+    function frame(keepView) {
+      var box = contentBox();
+      var next = box ? { x: box.x - PAD, y: box.y - PAD } : { x: 0, y: 0 };
+      var dx = (next.x - origin.x) * scale, dy = (next.y - origin.y) * scale;
+      origin = next;
+      paper.scale(scale, scale);
+      paper.translate(-origin.x * scale, -origin.y * scale);
+      var w = Math.max(holder.clientWidth, box ? Math.ceil((box.width + 2 * PAD) * scale) : 0);
+      var h = Math.max(holder.clientHeight, box ? Math.ceil((box.height + 2 * PAD) * scale) : 0);
+      paper.setDimensions(w, h);
+      if (keepView) {
+        holder.scrollLeft -= dx;
+        holder.scrollTop -= dy;
+      }
+      percent.textContent = Math.round(scale * 100) + "%";
+      mount.classList.toggle("mb-small", scale < LABEL_SCALE);
+    }
+    function fitAll(userAsked) {
+      var box = contentBox();
+      var availW = holder.clientWidth, availH = holder.clientHeight;
+      if (box && availW && availH) {
+        scale = Math.min(1, availW / (box.width + 2 * PAD), availH / (box.height + 2 * PAD));
+        scale = Math.max(fitFloor(), scale);
+      }
+      fitted = true;
+      frame(false);
+      holder.scrollLeft = 0;
+      holder.scrollTop = 0;
+      // At the floor the machine may not fit, so keep the running state in view.
+      if (data && data.current != null) reveal(data.current);
+      if (userAsked) broadcast();
+    }
+    function fitFloor() { return behaviourMode() && tool !== "select_only" ? BEHAVIOUR_FIT_FLOOR : MIN_SCALE; }
+    // Zooms about a point in the view (the middle, by default), so what's there stays there.
+    function zoomTo(next, ax, ay) {
+      next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, next));
+      if (ax == null) { ax = holder.clientWidth / 2; ay = holder.clientHeight / 2; }
+      var lx = (holder.scrollLeft + ax) / scale + origin.x, ly = (holder.scrollTop + ay) / scale + origin.y;
+      scale = next;
+      fitted = false;
+      frame(false);
+      holder.scrollLeft = (lx - origin.x) * scale - ax;
+      holder.scrollTop = (ly - origin.y) * scale - ay;
+      broadcast();
+    }
+    function zoomBy(factor, ax, ay) { zoomTo(scale * factor, ax, ay); }
+    // Read-only panes that compare two versions zoom and scroll together.
+    function broadcast() {
+      if (syncing || !data || !data.sync) return;
+      (window.mbdiagramSync[data.sync] || []).forEach(function (other) {
+        if (other !== api) other.follow(scale, holder.scrollLeft, holder.scrollTop);
+      });
+    }
+    var api = {
+      follow: function (s, left, top) {
+        syncing = true;
+        if (Math.abs(s - scale) > 0.001) { scale = s; fitted = false; frame(false); }
+        holder.scrollLeft = left;
+        holder.scrollTop = top;
+        syncing = false;
+      }
+    };
+    window.mbdiagramSync = window.mbdiagramSync || {};
+    holder.addEventListener("scroll", function () { if (!syncing) broadcast(); });
+    // Where the changed nodes are, when the whole diagram had to shrink to fit.
+    function frameFocus() {
+      var ids = (data && data.focus) || [];
+      var cells = ids.map(function (id) { return graph.getCell(id); }).filter(Boolean);
+      if (cells.length === 0) return;
+      var box = graph.getCellsBBox(cells);
+      holder.scrollLeft = Math.max(0, (box.x + box.width / 2 - origin.x) * scale - holder.clientWidth / 2);
+      holder.scrollTop = Math.max(0, (box.y + box.height / 2 - origin.y) * scale - holder.clientHeight / 2);
+    }
+    // The part of the view not covered by an overlay column, in view pixels.
+    function openSpan() {
+      var lo = 0, hi = holder.clientWidth, r = holder.getBoundingClientRect();
+      var body = el.closest(".mb-body");
+      if (body) body.querySelectorAll(".mb-col-overlay").forEach(function (col) {
+        var q = col.getBoundingClientRect();
+        if (q.right <= r.left || q.left >= r.right) return;
+        if (q.left - r.left > r.right - q.right) hi = Math.min(hi, q.left - r.left); else lo = Math.max(lo, q.right - r.left);
+      });
+      return hi - lo < 120 ? { lo: 0, hi: holder.clientWidth } : { lo: lo, hi: hi };
+    }
+    // Scrolls a cell into the middle of the open view when any part of it is out of sight.
     function reveal(id) {
       var cell = id == null ? null : graph.getCell(id);
       if (!cell) return;
-      var s = paper.scale().sx, box = cell.getBBox();
-      var x0 = box.x * s, y0 = box.y * s, x1 = (box.x + box.width) * s, y1 = (box.y + box.height) * s;
-      var inside = x0 >= holder.scrollLeft && x1 <= holder.scrollLeft + holder.clientWidth &&
+      var box = cell.getBBox(), span = openSpan();
+      var x0 = (box.x - origin.x) * scale, y0 = (box.y - origin.y) * scale, x1 = x0 + box.width * scale, y1 = y0 + box.height * scale;
+      var inside = x0 >= holder.scrollLeft + span.lo && x1 <= holder.scrollLeft + span.hi &&
                    y0 >= holder.scrollTop && y1 <= holder.scrollTop + holder.clientHeight;
       if (inside) return;
-      holder.scrollLeft = Math.max(0, (x0 + x1) / 2 - holder.clientWidth / 2);
+      var left = Math.max(0, (x0 + x1) / 2 - (span.lo + span.hi) / 2);
+      // A fitted paper has no room to scroll, so widen it past an overlay on the right.
+      var room = left + holder.clientWidth;
+      if (room > paper.options.width) paper.setDimensions(Math.ceil(room), paper.options.height);
+      holder.scrollLeft = left;
       holder.scrollTop = Math.max(0, (y0 + y1) / 2 - holder.clientHeight / 2);
     }
+    // An inspector opening over the canvas keeps the selection in sight (UX re-review P2.1).
+    // The view from before the first reveal is kept, and put back when the overlay closes, since
+    // a closing overlay frees no layout space and so fires no resize (UX re-review N1).
+    var overlayView = null;
+    function onOverlay(evt) {
+      if (!el.isConnected) {
+        document.removeEventListener("mb:overlay", onOverlay);
+        document.removeEventListener("mb:overlay-closed", onOverlay);
+        return;
+      }
+      if (evt.type === "mb:overlay") {
+        if (selected.length !== 1) return;
+        if (!overlayView) overlayView = { fitted: fitted, scale: scale, left: holder.scrollLeft, top: holder.scrollTop };
+        reveal(selected[0]);
+        return;
+      }
+      var view = overlayView;
+      overlayView = null;
+      if (!view) return;
+      // Shrink the widened paper first, so its scrollbars are gone before Fit measures the view.
+      frame(false);
+      if (fitted && view.fitted) { fitAll(false); return; }
+      if (Math.abs(scale - view.scale) < 0.001) {
+        holder.scrollLeft = view.left;
+        holder.scrollTop = view.top;
+      }
+    }
+    document.addEventListener("mb:overlay", onOverlay);
+    document.addEventListener("mb:overlay-closed", onOverlay);
     function paperWidth(x) { return Math.max(el.clientWidth || 600, 500); }
     // A stub runs a short way off its block, towards the view's edge.
     function placeStubs(links) {
@@ -312,26 +676,6 @@ HTMLWidgets.widget({
         if (s.id) link.target(point); else link.source(point);
       });
     }
-    function fit() {
-      var box = graph.getBBox();
-      if (tool === "select_only") { fitToView(box); return; }
-      var w = Math.max(el.clientWidth || 800, box ? box.x + box.width + 80 : 0);
-      var h = Math.max(el.clientHeight || 500, box ? box.y + box.height + 110 : 0);
-      paper.setDimensions(w, h);
-    }
-    // Read-only views (Behavioral impact) exist to show the whole diagram, so they shrink it
-    // to the box, down to a readable floor, and scroll only past that.
-    function fitToView(box) {
-      var availW = el.clientWidth, availH = el.clientHeight;
-      if (!box || !availW || !availH) return;
-      var pad = 24, contentW = box.x + box.width + pad, contentH = box.y + box.height + pad;
-      var originX = Math.max(0, box.x - pad), originY = Math.max(0, box.y - pad);
-      var s = Math.min(1, availW / (contentW - originX), availH / (contentH - originY));
-      s = Math.max(0.35, s);
-      paper.scale(s, s);
-      paper.translate(-originX * s, -originY * s);
-      paper.setDimensions(Math.max(availW, (contentW - originX) * s), Math.max(availH, (contentH - originY) * s));
-    }
 
     // Touches only the cells whose state changed: a full pass redraws every link.
     function paintSelected(cell, on) {
@@ -340,11 +684,7 @@ HTMLWidgets.widget({
         cell.attr("line/strokeWidth", on ? width + 1 : width);
         return;
       }
-      var node = data && data.nodes.filter(function (n) { return n.id === cell.id; })[0];
-      var base = node ? blockAttrs(node).body || {} : {};
-      cell.attr("body/stroke", on ? INK : (base.stroke || LINE));
-      cell.attr("body/strokeWidth", on ? 2 : (base.strokeWidth || 1));
-      if (on) cell.removeAttr("body/strokeDasharray"); else if (base.strokeDasharray) cell.attr("body/strokeDasharray", base.strokeDasharray);
+      cell.attr("outline/stroke", on ? INK : "none");
     }
     function applySelection() {
       painted.filter(function (id) { return selected.indexOf(id) < 0; }).forEach(function (id) {
@@ -361,6 +701,16 @@ HTMLWidgets.widget({
       selected = ids;
       applySelection();
       send("select", { ids: ids, kind: kind });
+    }
+    // The transition the simulator just took, drawn heavy for a moment.
+    function pulse(id) {
+      var link = id == null ? null : graph.getCell(id);
+      if (!link || !link.isLink()) return;
+      var width = link.get("mbWidth") || 2;
+      link.attr("line/strokeWidth", 5);
+      setTimeout(function () {
+        if (graph.getCell(id)) link.attr("line/strokeWidth", selected.indexOf(id) >= 0 ? width + 1 : width);
+      }, 900);
     }
 
     paper.on("element:pointerclick", function (view, evt) {
@@ -388,7 +738,7 @@ HTMLWidgets.widget({
     paper.on("link:pointerclick", function (view) { select([String(view.model.id)], "connector"); });
     paper.on("blank:pointerclick", function (evt, x, y) {
       if (tool === "component") { send("add_component", { x: x, y: y }); return; }
-      select([], "none");
+      if (tool !== "select_only") select([], "none");
     });
     paper.on("element:pointerup", function (view) {
       var model = view.model, id = String(model.id);
@@ -397,7 +747,9 @@ HTMLWidgets.widget({
       model.set("mbLast", { x: p.x, y: p.y }, { silent: true });
       if (before && before.x === p.x && before.y === p.y) return;
       spreadParallel();
-      fit();
+      separateChannels();
+      placeLabels();
+      frame(true);
       send("move", { id: id, x: p.x, y: p.y });
     });
     paper.on("element:pointerdown", function (view) {
@@ -408,18 +760,54 @@ HTMLWidgets.widget({
       var s = view.model.source(), t = view.model.target();
       send("connect", { source: s.port, target: t.port, source_id: String(s.id), target_id: t.id == null ? null : String(t.id) });
     });
+    // Dragging empty canvas pans the view.
+    var pan = null;
+    paper.on("blank:pointerdown", function (evt) {
+      if (tool !== "select" && tool !== "select_only") return;
+      pan = { x: evt.clientX, y: evt.clientY, left: holder.scrollLeft, top: holder.scrollTop };
+      holder.style.cursor = "grabbing";
+    });
+    document.addEventListener("mousemove", function (evt) {
+      if (!pan) return;
+      holder.scrollLeft = pan.left - (evt.clientX - pan.x);
+      holder.scrollTop = pan.top - (evt.clientY - pan.y);
+    });
+    document.addEventListener("mouseup", function () {
+      if (!pan) return;
+      pan = null;
+      holder.style.cursor = tool === "select" || tool === "select_only" ? "" : "crosshair";
+    });
+    // Ctrl or ⌘ with the wheel (or a trackpad pinch) zooms about the pointer.
+    holder.addEventListener("wheel", function (evt) {
+      if (!evt.ctrlKey && !evt.metaKey) return;
+      evt.preventDefault();
+      var rect = holder.getBoundingClientRect();
+      zoomBy(Math.exp(-evt.deltaY * 0.0025), evt.clientX - rect.left, evt.clientY - rect.top);
+    }, { passive: false });
 
     function connectedBlocks(id) {
       return graph.getNeighbors(graph.getCell(id)).map(function (c) { return String(c.id); });
     }
     holder.addEventListener("keydown", function (evt) {
+      var mod = evt.ctrlKey || evt.metaKey;
+      if (mod && (evt.key === "z" || evt.key === "Z")) {
+        if (tool === "select_only") return;
+        evt.preventDefault();
+        send(evt.shiftKey ? "redo" : "undo");
+        return;
+      }
+      if (mod && (evt.key === "y" || evt.key === "Y") && tool !== "select_only") { evt.preventDefault(); send("redo"); return; }
+      if (!mod && (evt.key === "+" || evt.key === "=")) { evt.preventDefault(); zoomBy(1.2); return; }
+      if (!mod && (evt.key === "-" || evt.key === "_")) { evt.preventDefault(); zoomBy(1 / 1.2); return; }
+      if (!mod && evt.key === "0") { evt.preventDefault(); fitAll(true); return; }
+      if (!mod && evt.key === "1") { evt.preventDefault(); zoomTo(1); return; }
       if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].indexOf(evt.key) < 0 && evt.key !== "Enter") return;
-      var blocks = graph.getElements();
+      var blocks = graph.getElements().filter(function (b) { return String(b.id).indexOf("B:") !== 0; });
       if (blocks.length === 0) return;
       evt.preventDefault();
       var current = selected[0] && graph.getCell(selected[0]) && graph.getCell(selected[0]).isElement() ? selected[0] : null;
       if (evt.key === "Enter") { if (current) send("open", { id: current }); return; }
-      if (!current) { select([String(blocks[0].id)], "element"); return; }
+      if (!current) { select([String(blocks[0].id)], "element"); reveal(String(blocks[0].id)); return; }
       var here = graph.getCell(current).getBBox().center();
       var wanted = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[evt.key];
       var best = null, bestScore = -Infinity;
@@ -429,9 +817,25 @@ HTMLWidgets.widget({
         var score = (dx * wanted[0] + dy * wanted[1]) / len;
         if (score > bestScore) { bestScore = score; best = id; }
       });
-      if (best && bestScore > 0 && best.indexOf("B:") !== 0) select([best], "element");
+      if (best && bestScore > 0 && best.indexOf("B:") !== 0) { select([best], "element"); reveal(best); }
     });
 
+    // A state machine has no reading order, so it lays out left to right and wraps into rows
+    // shaped like the view; Fit then lands near 70% rather than 40% (UX re-review R3).
+    // Structure and activities read top to bottom, since their ports sit on tops and bottoms.
+    // Layers sit closer than blocks in a layer: chains of blocks are what make a diagram tall,
+    // and wider gaps across give the routes room to keep apart.
+    function layoutOptions() {
+      var o = { "elk.algorithm": "layered", "elk.direction": "DOWN", "elk.edgeRouting": "ORTHOGONAL", "elk.spacing.nodeNode": behaviourMode() ? "150" : "80", "elk.layered.spacing.nodeNodeBetweenLayers": behaviourMode() ? "120" : "64", "elk.spacing.edgeNode": "24", "elk.padding": "[top=48,left=120,bottom=48,right=120]", "elk.portConstraints": "FIXED_SIDE" };
+      if (data && data.mode === "state_machine" && holder.clientWidth > 0 && holder.clientHeight > 0) {
+        o["elk.direction"] = "RIGHT";
+        o["elk.spacing.nodeNode"] = "60";
+        o["elk.padding"] = "[top=48,left=48,bottom=48,right=48]";
+        o["elk.layered.wrapping.strategy"] = "MULTI_EDGE";
+        o["elk.aspectRatio"] = String(holder.clientWidth / holder.clientHeight);
+      }
+      return o;
+    }
     // Runs ELK layered with port sides. Pinned blocks keep their positions.
     function autoLayout(userAsked) {
       if (!data) return;
@@ -442,7 +846,7 @@ HTMLWidgets.widget({
       blocks.forEach(function (b) { known[b.id] = true; });
       var graphDef = {
         id: "root",
-        layoutOptions: { "elk.algorithm": "layered", "elk.direction": "DOWN", "elk.spacing.nodeNode": behaviourMode() ? "150" : "48", "elk.layered.spacing.nodeNodeBetweenLayers": behaviourMode() ? "120" : "80", "elk.padding": "[top=48,left=120,bottom=48,right=120]", "elk.portConstraints": "FIXED_SIDE" },
+        layoutOptions: layoutOptions(),
         children: blocks.map(function (b) {
           var size = b.size();
           return { id: String(b.id), width: size.width, height: size.height, layoutOptions: { "elk.portConstraints": "FIXED_SIDE" },
@@ -457,43 +861,69 @@ HTMLWidgets.widget({
         })
       };
       return elk.layout(graphDef).then(function (out) {
-        var positions = [];
+        var positions = [], moved = 0;
         var pinned = {};
         data.nodes.forEach(function (n) { if (n.pinned) pinned[n.id] = true; });
-        graph.startBatch("layout");
+        var targets = {};
         out.children.forEach(function (c) {
-          var block = graph.getCell(c.id);
           if (pinned[c.id]) return;
-          var x = Math.round(c.x), y = Math.round(c.y);
-          block.position(x, y);
-          positions.push({ id: c.id, x: x, y: y });
+          targets[c.id] = { x: Math.round(c.x), y: Math.round(c.y) };
         });
         // What's outside the system sits in a row under everything inside it.
         var outside = data.nodes.filter(function (n) { return n.kind === "external" && !pinned[n.id]; });
         if (outside.length > 0) {
           var deepest = 0;
-          blocks.forEach(function (b) { if (!outside.some(function (n) { return n.id === b.id; })) deepest = Math.max(deepest, b.position().y + b.size().height); });
-          outside.forEach(function (n, i) {
-            var cell = graph.getCell(n.id), x = 120 + i * 240, y = deepest + 110;
-            cell.position(x, y);
-            positions = positions.filter(function (p) { return p.id !== n.id; }).concat([{ id: n.id, x: x, y: y }]);
+          blocks.forEach(function (b) {
+            if (outside.some(function (n) { return n.id === b.id; })) return;
+            var at = targets[b.id] || b.position();
+            deepest = Math.max(deepest, at.y + b.size().height);
           });
+          outside.forEach(function (n, i) { targets[n.id] = { x: 120 + i * 240, y: deepest + 110 }; });
         }
-        graph.stopBatch("layout");
-        placeStubs(graph.getLinks());
-        drawBand();
-        spreadParallel();
-        fit();
-        showBlocks();
-        send("layout", { positions: positions, user: !!userAsked });
+        Object.keys(targets).forEach(function (id) {
+          var p = graph.getCell(id).position();
+          if (p.x !== targets[id].x || p.y !== targets[id].y) moved++;
+          positions.push({ id: id, x: targets[id].x, y: targets[id].y });
+        });
+        // Nothing moved is nothing to undo.
+        function settle() {
+          placeStubs(graph.getLinks());
+          drawBand();
+          graph.getLinks().forEach(routeLink);
+          spreadParallel();
+          separateChannels();
+          placeLabels();
+          fitAll(false);
+          send("layout", { positions: positions, user: !!userAsked && moved > 0 });
+        }
+        var pinnedCount = Object.keys(pinned).filter(function (id) { return known[id]; }).length;
+        if (userAsked && moved === 0) {
+          showStatus(pinnedCount > 0 ? "Layout unchanged: " + pinnedCount + " block" + (pinnedCount === 1 ? " is" : "s are") + " pinned." : "Layout unchanged: it was already laid out.");
+          settle();
+          return;
+        }
+        // A short glide shows what moved; with many blocks it would only be slow.
+        var animate = userAsked && positions.length <= 40;
+        positions.forEach(function (p) {
+          var cell = graph.getCell(p.id);
+          if (animate) cell.transition("position", { x: p.x, y: p.y }, { duration: 260, valueFunction: joint.util.interpolate.object });
+          else cell.position(p.x, p.y);
+        });
+        if (userAsked) showStatus("Laid out " + moved + " block" + (moved === 1 ? "" : "s") + (pinnedCount > 0 ? "; " + pinnedCount + " pinned stayed put." : "."));
+        if (animate) setTimeout(settle, 300); else settle();
       });
     }
 
     if (window.Shiny && Shiny.addCustomMessageHandler) {
       Shiny.addCustomMessageHandler("mbdiagram-" + el.id, function (msg) {
         if (msg.type === "set_tool") { tool = msg.payload.tool; holder.style.cursor = tool === "select" ? "" : "crosshair"; }
-        if (msg.type === "set_selection") { selected = msg.payload.ids || []; applySelection(); }
+        if (msg.type === "set_selection") {
+          selected = msg.payload.ids || [];
+          applySelection();
+          if (selected.length === 1) reveal(selected[0]);
+        }
         if (msg.type === "auto_layout") autoLayout(true);
+        if (msg.type === "fit") fitAll(true);
         if (msg.type === "set_current" && data) {
           var was = data.current;
           data.current = msg.payload.id == null ? null : msg.payload.id;
@@ -503,21 +933,22 @@ HTMLWidgets.widget({
             if (cell) cell.attr(blockAttrs(n));
           });
           reveal(data.current);
+          if (msg.payload.via) pulse(msg.payload.via);
         }
       });
     }
-    // Panes that start hidden or change width (side by side) don't always get a resize call.
+    // Panes that start hidden or change size don't always get a resize call.
     if (window.ResizeObserver) {
       var lastSize = "";
       new ResizeObserver(function () {
-        var size = el.clientWidth + "x" + el.clientHeight;
-        if (size === lastSize || !data) return;
+        var size = holder.clientWidth + "x" + holder.clientHeight;
+        if (size === lastSize || !data || holder.clientWidth === 0) return;
         lastSize = size;
-        fit();
+        if (fitted) fitAll(false); else frame(true);
       }).observe(el);
     }
     window.mbdiagramDebug = window.mbdiagramDebug || {};
-    window.mbdiagramDebug[el.id] = { graph: graph, paper: paper };
+    window.mbdiagramDebug[el.id] = { graph: graph, paper: paper, scale: function () { return scale; }, layoutOptions: layoutOptions, separateChannels: separateChannels, placeLabels: placeLabels };
 
     return {
       renderValue: function (x) {
@@ -525,10 +956,12 @@ HTMLWidgets.widget({
         var parsed = JSON.parse(x.json);
         if (parsed.tool) tool = parsed.tool;
         selected = parsed.selected || [];
+        if (data && data.sync) window.mbdiagramSync[data.sync] = (window.mbdiagramSync[data.sync] || []).filter(function (o) { return o !== api; });
+        if (parsed.sync) (window.mbdiagramSync[parsed.sync] = window.mbdiagramSync[parsed.sync] || []).push(api);
         build(parsed);
         el.setAttribute("data-render-ms", String(Math.round(performance.now() - t0)));
       },
-      resize: function () { if (data) fit(); }
+      resize: function () { if (!data) return; if (fitted) fitAll(false); else frame(true); }
     };
   }
 });

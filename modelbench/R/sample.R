@@ -19,7 +19,7 @@ SAMPLE_BUILD_ORDER <- c(
   "interface", "interface_field", "port", "connector", "property_value", "test_case",
   "scenario", "seq_lifeline", "seq_step", "act_node", "act_edge", "state_machine",
   "sm_state", "sm_event", "sm_event_scope", "sm_variable", "sm_transition", "sm_ignore",
-  "sm_assertion", "link"
+  "sm_assertion", "failure_mode", "failure_waiver", "link"
 )
 
 # Values that differ in BL-03 form. FLD-0005 didn't exist then.
@@ -38,6 +38,8 @@ sample_copy_plain <- function(con, source, table) {
   rows <- DBI::dbReadTable(source, table)
   # init_project_db() has already set the schema version.
   if (table == "project_meta") rows <- rows[rows$key != "schema_version", , drop = FALSE]
+  # Every project starts with the standard unit registry, so only the sample's extra units are new.
+  if (table == "unit") rows <- rows[!rows$symbol %in% DBI::dbGetQuery(con, "SELECT symbol FROM unit")$symbol, , drop = FALSE]
   for (i in seq_len(nrow(rows))) write_plain(con, table, as.list(rows[i, , drop = FALSE]))
 }
 

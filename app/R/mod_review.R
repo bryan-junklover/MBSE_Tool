@@ -1,24 +1,52 @@
 # Analyze › Review queue: structural gaps from code and AI proposals (handoff §5.3).
 
-mod_review_ui <- function(id) {
+mod_review_ui <- function(id, tabs = NULL) {
   ns <- shiny::NS(id)
-  shiny::tags$div(
-    class = "mb-body",
-    shiny::tags$aside(class = "mb-left",
-                      shiny::checkboxGroupInput(ns("sources"), "Source", choices = c("Structural check" = "structural", "AI-inferred" = "ai"), selected = c("structural", "ai")),
-                      shiny::radioButtons(ns("status"), "Status", choices = c("Open" = "open", "Kept" = "kept", "Dismissed" = "dismissed"))),
-    shiny::tags$main(class = "mb-main",
-                     shiny::tags$div(class = "mb-head", shiny::tags$h1(style = "margin:0;font-size:20px;font-weight:600", "Review queue"),
-                                     shiny::tags$span(class = "mb-caption", "The AI asks; it may sketch structure as unreviewed drafts. Values and links stay yours, and nothing reaches a baseline without your note.")),
-                     shiny::uiOutput(ns("cards"))),
-    shiny::tags$aside(class = "mb-right",
-                      shiny::tags$b("Run analysis"),
-                      shiny::tags$span(class = "mb-caption", "Structural checks run by code, with no AI, every time this page refreshes."),
-                      shiny::actionButton(ns("run"), "Ask AI about gaps", class = "mb-btn mb-btn-ai"),
-                      shiny::uiOutput(ns("run_status")),
-                      shiny::uiOutput(ns("provenance")))
+  shiny::tagList(
+    screen_bar(tabs, actions = shiny::tagList(shiny::uiOutput(ns("run_status"), inline = TRUE),
+                                              shiny::actionButton(ns("run"), "Ask AI about gaps", class = "mb-btn mb-btn-ai"))),
+    shiny::tags$div(
+      class = "mb-scroll",
+      shiny::tags$div(
+        class = "mb-reading mb-queue-page",
+        shiny::tags$div(class = "mb-head", shiny::tags$h1(style = "margin:0;font-size:20px;font-weight:600", "Review queue"),
+                        shiny::tags$span(class = "mb-caption", "The AI asks; it may sketch structure as unreviewed drafts. Values and links stay yours, and nothing reaches a baseline without your note.")),
+        # Filters in one row above the list (UX review §2.25).
+        shiny::tags$div(class = "mb-filterbar",
+                        shiny::checkboxGroupInput(ns("sources"), "Source", choices = c("Structural check" = "structural", "AI-inferred" = "ai"), selected = c("structural", "ai"), inline = TRUE),
+                        shiny::radioButtons(ns("status"), "Status", choices = c("Open" = "open", "Kept" = "kept", "Dismissed" = "dismissed"), inline = TRUE),
+                        shiny::tags$span(class = "mb-caption mb-push", "Structural checks run by code, with no AI. Each kept item keeps its model, prompt version and your note.")),
+        shiny::uiOutput(ns("cards"))
+      )
+    )
   )
 }
+
+# Structural gaps of one kind, one compact row each, under a single heading.
+render_gap_group <- function(rows, title, ns) {
+  shiny::tags$section(
+    class = "mb-panel mb-gap-group",
+    shiny::tags$div(class = "mb-head", shiny::tags$span(class = "mb-tag", "STRUCTURAL"), shiny::tags$b(sprintf("%s (%d)", title, nrow(rows)))),
+    lapply(seq_len(nrow(rows)), function(i) {
+      row <- rows[i, ]
+      open <- row$status == "open"
+      shiny::tags$div(
+        class = "mb-gap-row-item",
+        shiny::tags$span(class = "mb-gap-title", row$title),
+        if (open) {
+          shiny::tags$span(class = "mb-term-actions",
+                           shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", onclick = event_js(ns("show"), list(kind = row$target_kind, id = row$target_id, title = row$title)), "Show on diagram"),
+                           shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", onclick = event_js(ns("ask"), row$title), "Ask AI to draft…"),
+                           shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", onclick = event_js(ns("dismiss"), row$id), "Dismiss with reason"))
+        } else {
+          shiny::tags$span(class = "mb-caption", if (!is.na(row$dismiss_reason)) sprintf("Reason: %s", row$dismiss_reason) else if (!is.na(row$engineer_note)) sprintf("Your note: %s", row$engineer_note))
+        }
+      )
+    })
+  )
+}
+
+GAP_GROUP_TITLES <- c(element = "No linked requirements", port = "Ports with no connector")
 
 # One button per candidate, off until the rationale has text (handoff §5.3).
 render_candidate_choices <- function(row, ns, dismiss = NULL) {
@@ -58,18 +86,28 @@ render_proposal_card <- function(row, ns) {
     if (!is.na(row$body) && nzchar(row$body)) shiny::tags$div(class = "mb-caption", row$body),
     if (!is.null(payload$`_warning`)) shiny::tags$div(class = "mb-gap", style = "font-size:12px", payload$`_warning`),
     if (!is.null(payload$`_invented`)) shiny::tags$div(class = "mb-caption", sprintf("%d value%s the model tried to invent became [value].", payload$`_invented`, if (payload$`_invented` == 1L) "" else "s")),
-    if (row$proposal_kind %in% c("sketch_element", "sketch_function")) {
-      ports <- vapply(payload$ports, function(port) sprintf("%s %s", port$direction, port$interface), "")
-      shiny::tagList(
+    if (row$proposal_kind %in% c("sketch_element", "sketch_function", "sketch_failure")) {
+      box <- if (row$proposal_kind == "sketch_failure") {
+        effects <- c(payload$local_effect, payload$system_effect)
+        shiny::tags$div(class = "mb-sketch-box",
+                        shiny::tags$div(class = "mono mb-caption", "Suggested failure · the response stays yours"),
+                        shiny::tags$b(payload$subject_label %||% payload$subject_id), " · ", FAILURE_CAUSES[[payload$cause_kind]],
+                        if (length(effects) > 0L) shiny::tags$div(style = "font-size:13px", paste(effects[nzchar(effects)], collapse = " → ")))
+      } else {
+        ports <- vapply(payload$ports, function(port) sprintf("%s %s", port$direction, port$interface), "")
         shiny::tags$div(class = "mb-sketch-box",
                         shiny::tags$div(class = "mono mb-caption", "Sketch · structure only, no values"),
                         shiny::tags$b(payload$name), if (nzchar(payload$stereotype %||% "")) sprintf(" «%s»", payload$stereotype),
-                        if (length(ports) > 0L) paste(" · ports:", paste(ports, collapse = ", "))),
+                        if (length(ports) > 0L) paste(" · ports:", paste(ports, collapse = ", ")))
+      }
+      shiny::tagList(
+        box,
         if (open) {
           note <- ns(paste0("note_", row$id))
           confirm <- ns("keep")
           shiny::tagList(
-            shiny::tags$label(style = "display:flex;flex-direction:column;gap:4px;font-size:13px", "Your note: why the system needs this (required)",
+            shiny::tags$label(style = "display:flex;flex-direction:column;gap:4px;font-size:13px",
+                              if (row$proposal_kind == "sketch_failure") "Your note: why this failure matters (required)" else "Your note: why the system needs this (required)",
                               shiny::tags$input(type = "text", id = note, class = "mb-table-input", placeholder = "In your own words",
                                                 oninput = sprintf("document.getElementById('%s').disabled = !this.value.trim()", paste0(note, "_go")))),
             shiny::tags$div(class = "mb-term-actions",
@@ -111,6 +149,16 @@ render_proposal_card <- function(row, ns) {
   )
 }
 
+# "See the prompt": exactly what was sent, and the schema the answer had to fit.
+show_llm_call <- function(con, call_id) {
+  call <- DBI::dbGetQuery(con, "SELECT system_prompt, user_message, schema_json FROM llm_call WHERE id = ?", params = list(call_id))
+  shiny::req(nrow(call) == 1L)
+  shiny::showModal(shiny::modalDialog(title = "See the prompt", size = "l", easyClose = TRUE,
+                                      shiny::tags$pre(style = "white-space:pre-wrap;font-size:12px",
+                                                      paste0("SYSTEM\n", call$system_prompt, "\n\nMESSAGE\n", call$user_message, "\n\nANSWER SCHEMA\n", call$schema_json)),
+                                      footer = shiny::modalButton("Close")))
+}
+
 mod_review_server <- function(id, state) {
   shiny::moduleServer(id, function(input, output, session) {
     ns <- session$ns
@@ -131,7 +179,16 @@ mod_review_server <- function(id, state) {
     output$cards <- shiny::renderUI({
       rows <- proposals()
       if (nrow(rows) == 0L) return(shiny::tags$p(class = "mb-caption", "Nothing here."))
-      lapply(seq_len(nrow(rows)), function(i) render_proposal_card(rows[i, ], ns))
+      structural <- rows[rows$source == "structural", , drop = FALSE]
+      others <- rows[rows$source != "structural", , drop = FALSE]
+      kinds <- unique(structural$target_kind)
+      shiny::tagList(
+        lapply(kinds, function(kind) {
+          title <- if (kind %in% names(GAP_GROUP_TITLES)) GAP_GROUP_TITLES[[kind]] else term_to_title(kind)
+          render_gap_group(structural[structural$target_kind == kind, , drop = FALSE], title, ns)
+        }),
+        lapply(seq_len(nrow(others)), function(i) render_proposal_card(others[i, ], ns))
+      )
     })
 
     shiny::observeEvent(input$keep, {
@@ -148,7 +205,7 @@ mod_review_server <- function(id, state) {
       draft <- guarded_edit(start_from_sketch(con(), input$start))
       if (is.null(draft)) return()
       invalidate_db(state, "ai")
-      state$open_in_write(list(text = draft))
+      state$open_in_write(list(text = draft, proposal = input$start))
       go_to(state, "Write", "Draft")
     })
     shiny::observeEvent(input$dismiss, {
@@ -168,6 +225,9 @@ mod_review_server <- function(id, state) {
       target <- input$show
       element <- if (target$kind == "port") read_entity(con(), "port", target$id)$element_id else target$id
       state$selected_entity(list(kind = "element", ids = element))
+      # The diagram screen offers the way back to this item (§2.26).
+      state$return_to(list(label = if (is.null(target$title)) element else target$title,
+                           from = list(workspace = "Analyze", tab = "Review queue"), at = list(workspace = "Model", tab = "Structure")))
       go_to(state, "Model", "Structure")
     })
 
@@ -188,17 +248,7 @@ mod_review_server <- function(id, state) {
       if (gaps_task$status() == "running") return(shiny::tags$span(class = "mb-caption", "Checking…"))
       if (!is.null(run_message())) shiny::tags$span(run_message())
     })
-    output$provenance <- shiny::renderUI({
-      shiny::tags$span(class = "mb-caption", "Each kept item is stored with the model, prompt version and your note, and stays marked as AI-originated.")
-    })
-    shiny::observeEvent(input$see_call, {
-      call <- DBI::dbGetQuery(con(), "SELECT system_prompt, user_message, schema_json FROM llm_call WHERE id = ?", params = list(input$see_call))
-      shiny::req(nrow(call) == 1L)
-      shiny::showModal(shiny::modalDialog(title = "See the prompt", size = "l", easyClose = TRUE,
-                                          shiny::tags$pre(style = "white-space:pre-wrap;font-size:12px",
-                                                          paste0("SYSTEM\n", call$system_prompt, "\n\nMESSAGE\n", call$user_message, "\n\nANSWER SCHEMA\n", call$schema_json)),
-                                          footer = shiny::modalButton("Close")))
-    })
+    shiny::observeEvent(input$see_call, show_llm_call(con(), input$see_call))
     invisible(list(proposals = proposals, task = gaps_task))
   })
 }

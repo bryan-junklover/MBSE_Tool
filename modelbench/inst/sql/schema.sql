@@ -42,6 +42,27 @@ CREATE TABLE IF NOT EXISTS unit (
   si_offset REAL NOT NULL DEFAULT 0
 );
 
+-- A standard unit registry, in every project. Engineers add their own in Project › Units
+-- & properties. A unit converts to SI as value * si_factor + si_offset.
+INSERT OR IGNORE INTO unit (symbol, quantity, si_symbol, si_factor, si_offset) VALUES
+ ('kg','mass','kg',1,0), ('g','mass','kg',0.001,0), ('t','mass','kg',1000,0),
+ ('W','power','W',1,0), ('mW','power','W',0.001,0), ('kW','power','W',1000,0),
+ ('V','voltage','V',1,0), ('mV','voltage','V',0.001,0), ('kV','voltage','V',1000,0),
+ ('A','current','A',1,0), ('mA','current','A',0.001,0),
+ ('mAh','charge','C',3.6,0), ('Ah','charge','C',3600,0), ('C','charge','C',1,0),
+ ('J','energy','J',1,0), ('kJ','energy','J',1000,0), ('Wh','energy','J',3600,0), ('kWh','energy','J',3600000,0),
+ ('s','time','s',1,0), ('ms','time','s',0.001,0), ('µs','time','s',0.000001,0), ('min','time','s',60,0), ('h','time','s',3600,0), ('d','time','s',86400,0),
+ ('Hz','frequency','Hz',1,0), ('kHz','frequency','Hz',1000,0), ('MHz','frequency','Hz',1000000,0), ('GHz','frequency','Hz',1000000000,0),
+ ('m','length','m',1,0), ('mm','length','m',0.001,0), ('cm','length','m',0.01,0), ('km','length','m',1000,0),
+ ('m2','area','m2',1,0), ('km2','area','m2',1000000,0), ('L','volume','m3',0.001,0), ('m3','volume','m3',1,0),
+ ('m/s','speed','m/s',1,0), ('km/h','speed','m/s',0.277777777777778,0), ('m/s2','acceleration','m/s2',1,0),
+ ('deg','angle','rad',0.0174532925199433,0), ('rad','angle','rad',1,0), ('rpm','rotation rate','rad/s',0.10471975511966,0),
+ ('°C','temperature','K',1,273.15), ('K','temperature','K',1,0),
+ ('N','force','N',1,0), ('Nm','torque','Nm',1,0), ('Pa','pressure','Pa',1,0), ('kPa','pressure','Pa',1000,0), ('bar','pressure','Pa',100000,0),
+ ('%','ratio','1',0.01,0), ('dB','level','dB',1,0), ('dBm','power level','dBm',1,0),
+ ('bit/s','data rate','bit/s',1,0), ('kbit/s','data rate','bit/s',1000,0), ('Mbit/s','data rate','bit/s',1000000,0),
+ ('B','data size','B',1,0), ('kB','data size','B',1000,0), ('MB','data size','B',1000000,0), ('GB','data size','B',1000000000,0);
+
 CREATE TABLE IF NOT EXISTS glossary (
   term       TEXT PRIMARY KEY COLLATE NOCASE,
   definition TEXT,
@@ -305,13 +326,16 @@ CREATE TABLE IF NOT EXISTS link (
                    'satisfied_by',        -- requirement  -> element (allocation of a requirement)
                    'allocated_to',        -- function     -> component
                    'realized_by',         -- connector (functional) -> connector (physical)
+                   'hosted_on',           -- software element -> the hardware element it runs on
                    'derives_from',        -- requirement  -> requirement (outside the parent tree)
                    'refines',             -- requirement  -> requirement | scenario
                    'verified_by',         -- requirement  -> test_case | scenario | sm_assertion
+                   'detected_by',         -- failure_mode -> sm_event | requirement | test_case
+                   'handled_by',          -- failure_mode -> sm_transition | requirement | element
                    'traces_to')),         -- anything     -> anything (fallback, discouraged)
-  source_kind    TEXT NOT NULL CHECK (source_kind IN ('requirement','element','connector','interface','scenario','state_machine','test_case','sm_assertion')),
+  source_kind    TEXT NOT NULL CHECK (source_kind IN ('requirement','element','connector','interface','scenario','state_machine','test_case','sm_assertion','failure_mode','sm_event','sm_transition')),
   source_id      TEXT NOT NULL,
-  target_kind    TEXT NOT NULL CHECK (target_kind IN ('requirement','element','connector','interface','scenario','state_machine','test_case','sm_assertion')),
+  target_kind    TEXT NOT NULL CHECK (target_kind IN ('requirement','element','connector','interface','scenario','state_machine','test_case','sm_assertion','failure_mode','sm_event','sm_transition')),
   target_id      TEXT NOT NULL,
   rationale      TEXT,
   origin         TEXT NOT NULL DEFAULT 'human' CHECK (origin IN ('human','ai_candidate')),
@@ -539,14 +563,78 @@ CREATE TABLE IF NOT EXISTS view_def (
   is_builtin      INTEGER NOT NULL DEFAULT 0 CHECK (is_builtin IN (0,1))
 );
 
--- Built-in views, seeded on every open (handoff §5.4).
+-- Built-in views, seeded on every open (handoff §5.4). Software only reads the Domain field,
+-- which new projects use, rather than a stereotype they may not have; the UPDATE carries
+-- that to projects made before.
 INSERT OR IGNORE INTO view_def (id, name, view_kind, filter_json, is_builtin) VALUES
  ('VW-all', 'All components', 'structure', '{"kinds":["component"]}', 1),
  ('VW-budget', 'Power & mass budget', 'structure', '{"kinds":["component"],"property":{"name":"mass","op":">","value":0}}', 1),
- ('VW-software', 'Software only', 'structure', '{"kinds":["component"],"stereotypes":["SW"]}', 1),
+ ('VW-software', 'Software only', 'structure', '{"kinds":["component"],"domains":["sw"]}', 1),
  ('VW-trl', 'TRL below 6', 'structure', '{"kinds":["component"],"property":{"name":"trl","op":"<","value":6}}', 1),
  ('VW-flows', 'Flows', 'flows', '{"kinds":["component","external"]}', 1),
  ('VW-functional', 'Functional', 'functional', NULL, 1);
+UPDATE view_def SET filter_json = '{"kinds":["component"],"domains":["sw"]}' WHERE id = 'VW-software' AND is_builtin = 1;
+
+-- Failure modes: what can fail, why, what happens next, and how the system responds
+-- (docs/VIEWPOINTS_AND_FAILURES.md §3). Effects and responses only; no FMEA scoring.
+CREATE TABLE IF NOT EXISTS failure_mode (
+  id             TEXT PRIMARY KEY,        -- FM-0001
+  rev            INTEGER NOT NULL DEFAULT 1,
+  subject_kind   TEXT NOT NULL CHECK (subject_kind IN ('element','interface','port','sm_state')),
+  subject_id     TEXT NOT NULL,
+  field_name     TEXT,                    -- one field of an interface, or NULL for the whole interface
+  cause_kind     TEXT NOT NULL CHECK (cause_kind IN ('lost','stale','out_of_range','erroneous','degraded','failed',
+                                                     'open_circuit','short_circuit','over_temperature','mechanical','other')),
+  cause          TEXT,                    -- in the engineer's words
+  local_effect   TEXT,
+  system_effect  TEXT,
+  response_state TEXT NOT NULL DEFAULT 'placeholder' CHECK (response_state IN ('handled','accepted','unhandled','placeholder')),
+  response_note  TEXT,                    -- how it's handled, or why it's accepted
+  origin         TEXT NOT NULL DEFAULT 'human' CHECK (origin IN ('human','ai')),
+  review_state   TEXT NOT NULL DEFAULT 'reviewed' CHECK (review_state IN ('reviewed','unreviewed')),
+  review_note    TEXT,
+  CHECK (field_name IS NULL OR subject_kind = 'interface'),
+  CHECK (response_state <> 'accepted' OR length(trim(coalesce(response_note,''))) > 0),
+  -- The AI drafts causes and effects, never a response.
+  CHECK (origin = 'human' OR review_state = 'reviewed' OR response_state = 'placeholder'),
+  CHECK (origin = 'human' OR review_state = 'unreviewed' OR length(trim(coalesce(review_note,''))) > 0)
+);
+CREATE INDEX IF NOT EXISTS idx_failure_mode_subject ON failure_mode(subject_kind, subject_id);
+
+-- A missing-case check (rules 3-5) set aside for one subject, with the reason.
+CREATE TABLE IF NOT EXISTS failure_waiver (
+  rule         TEXT NOT NULL CHECK (rule IN ('missing_signal_loss','missing_power_loss','missing_over_temperature','missing_out_of_range')),
+  subject_kind TEXT NOT NULL CHECK (subject_kind IN ('port','element','interface_field')),
+  subject_id   TEXT NOT NULL,
+  rationale    TEXT NOT NULL CHECK (length(trim(rationale)) > 0),
+  rev          INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (rule, subject_kind, subject_id)
+);
+
+-- Stakeholder viewpoints: who a document is for, what it covers, and its sections in order
+-- (docs/VIEWPOINTS_AND_FAILURES.md). Read-only views of the model, delivered as documents.
+CREATE TABLE IF NOT EXISTS viewpoint (
+  id          TEXT PRIMARY KEY,           -- VP-hardware, VP-0001
+  name        TEXT NOT NULL,
+  stakeholder TEXT NOT NULL,              -- who reads it
+  concerns    TEXT NOT NULL,              -- what it answers, in a sentence
+  rules_json  TEXT NOT NULL,              -- {"domains": [...], "flow_types": [...], "sections": [...]}
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  is_builtin  INTEGER NOT NULL DEFAULT 0 CHECK (is_builtin IN (0,1))
+);
+
+-- Built-in viewpoints are rewritten on every open, so they follow the code.
+-- "unset" in domains means elements with no domain recorded.
+INSERT OR REPLACE INTO viewpoint (id, name, stakeholder, concerns, rules_json, sort_order, is_builtin) VALUES
+ ('VP-hardware', 'Hardware', 'Hardware engineers',
+  'What each part is, what it weighs and draws, what plugs into what, which software runs on it, and how it can fail.',
+  '{"domains":["hw","hw_sw","other","unset"],"flow_types":["energy","matter","data"],"sections":["summary","breakdown","interfaces","budgets","failures","effects","requirements","open_items"],"failure_causes":["lost","failed","degraded","open_circuit","short_circuit","over_temperature","mechanical"]}', 1, 1),
+ ('VP-software', 'Software', 'Software engineers',
+  'Where each piece of software runs, the signals it exchanges with their ranges, how its states respond to events, and what it does when things fail.',
+  '{"domains":["sw","hw_sw"],"flow_types":["data"],"sections":["summary","software","signals","states","failures","effects","requirements","open_items"],"failure_causes":["lost","stale","out_of_range","erroneous","degraded","failed","other"]}', 2, 1),
+ ('VP-systems', 'Systems', 'Systems engineering and reporting',
+  'The whole model in one document: structure, interfaces, budgets, software, behaviour, failures and open items.',
+  '{"domains":["hw","sw","hw_sw","other","unset"],"flow_types":["energy","matter","data"],"sections":["summary","breakdown","interfaces","budgets","software","signals","states","failures","effects","requirements","open_items"]}', 3, 1);
 
 CREATE TABLE IF NOT EXISTS layout (
   view_id    TEXT NOT NULL REFERENCES view_def(id) ON DELETE CASCADE,
@@ -614,7 +702,7 @@ CREATE TABLE IF NOT EXISTS task_route (
   task                 TEXT PRIMARY KEY CHECK (task IN (
                          'req_light_check','req_deep_check','scope_gaps','trace_coach',
                          'gap_inference','allocation_coach','impact_narrative',
-                         'behavior_sketch','behavior_analysis','stakeholder_summary','model_chat')),
+                         'behavior_sketch','behavior_analysis','stakeholder_summary','model_chat','failure_suggest')),
   trigger_mode         TEXT NOT NULL CHECK (trigger_mode IN ('every_edit','on_demand','when_asked')),
   provider_id          TEXT REFERENCES provider(id),
   model                TEXT,
@@ -640,6 +728,7 @@ INSERT OR IGNORE INTO task_route (task, trigger_mode, provider_id, model, fallba
  ('behavior_analysis', 'on_demand', 'anthropic', 'claude-sonnet-5-5', 'openai', 'gpt-5.6-luna'),
  ('stakeholder_summary', 'on_demand', 'openai', 'gpt-5.6-luna', 'lmstudio', NULL),
  ('model_chat', 'when_asked', 'anthropic', 'claude-haiku-5-5', 'lmstudio', NULL);
+-- failure_suggest is seeded by migration 004, which first lets task_route hold it.
 
 CREATE TABLE IF NOT EXISTS llm_call (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -681,7 +770,7 @@ CREATE TABLE IF NOT EXISTS ai_proposal (
   task                TEXT NOT NULL,
   proposal_kind       TEXT NOT NULL CHECK (proposal_kind IN (
                         'question','candidate_link','sketch_element','sketch_function',
-                        'sketch_step','sketch_requirement','example_rewrite','gap')),
+                        'sketch_step','sketch_requirement','example_rewrite','gap','sketch_failure')),
   source              TEXT NOT NULL DEFAULT 'ai' CHECK (source IN ('ai','structural')),  -- structural = code check
   target_kind         TEXT,
   target_id           TEXT,
@@ -762,7 +851,8 @@ CREATE VIEW IF NOT EXISTS v_unreviewed AS
   UNION ALL SELECT 'seq_step',      id, label FROM seq_step      WHERE review_state = 'unreviewed'
   UNION ALL SELECT 'act_node',      id, coalesce(label, id) FROM act_node WHERE review_state = 'unreviewed'
   UNION ALL SELECT 'sm_state',      id, name  FROM sm_state      WHERE review_state = 'unreviewed'
-  UNION ALL SELECT 'sm_transition', id, id    FROM sm_transition WHERE review_state = 'unreviewed';
+  UNION ALL SELECT 'sm_transition', id, id    FROM sm_transition WHERE review_state = 'unreviewed'
+  UNION ALL SELECT 'failure_mode',  id, id    FROM failure_mode  WHERE review_state = 'unreviewed';
 
 -- Event/state pairs that need a transition or an explicit ignore.
 CREATE VIEW IF NOT EXISTS v_sm_unhandled AS
@@ -795,6 +885,14 @@ CREATE VIEW IF NOT EXISTS v_unallocated_functions AS
     FROM element e
    WHERE e.kind = 'function'
      AND NOT EXISTS (SELECT 1 FROM link l WHERE l.link_type = 'allocated_to'
+                       AND l.source_kind = 'element' AND l.source_id = e.id);
+
+-- Software components with nothing recorded to run on.
+CREATE VIEW IF NOT EXISTS v_unhosted_software AS
+  SELECT e.id, e.name
+    FROM element e
+   WHERE e.kind = 'component' AND e.domain = 'sw'
+     AND NOT EXISTS (SELECT 1 FROM link l WHERE l.link_type = 'hosted_on'
                        AND l.source_kind = 'element' AND l.source_id = e.id);
 
 -- Blockers the database can see. Stale evidence is added by core code

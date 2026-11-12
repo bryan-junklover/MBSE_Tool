@@ -16,47 +16,45 @@ send_draft_js <- function(request_input, text_input) {
           request_input, text_input)
 }
 
-mod_write_ui <- function(id) {
+mod_write_ui <- function(id, tabs = NULL) {
   ns <- shiny::NS(id)
   shiny::tagList(
-    shiny::tags$div(
-      class = "mb-tabbar",
-      shiny::uiOutput(ns("mode")),
-      shiny::tags$div(class = "mb-actions",
-                      shiny::actionButton(ns("new"), "New requirement", class = "mb-btn"))
-    ),
+    screen_bar(tabs, shiny::uiOutput(ns("mode")),
+               actions = shiny::actionButton(ns("new"), "New requirement", class = "mb-btn")),
     shiny::tags$div(
       class = "mb-body",
-      shiny::tags$aside(class = "mb-left",
-                        shiny::tags$div(class = "mb-label", "Specification outline"),
-                        shiny::uiOutput(ns("outline")),
-                        shiny::uiOutput(ns("actors_note"))),
+      side_column("left", "write.outline", "Outline", width = 280,
+                  shiny::tags$div(class = "mb-label", "Specification outline"),
+                  shiny::uiOutput(ns("outline")),
+                  shiny::uiOutput(ns("actors_note"))),
       shiny::tags$main(
-        class = "mb-main",
+        class = "mb-main mb-draft-main",
         shiny::conditionalPanel(sprintf("output['%s'] == 'ears'", ns("mode_value")), mod_write_ears_ui(ns)),
         shiny::tags$div(class = "mb-draft",
                         shiny::textAreaInput(ns("text"), shiny::textOutput(ns("draft_label"), inline = TRUE), rows = 3, width = "100%")),
         shiny::tags$div(class = "mb-fields",
-                        shiny::selectInput(ns("parent"), "Parent", choices = with_blank(character(0), "None")),
-                        shiny::selectInput(ns("level"), "Level", choices = REQ_LEVELS),
-                        shiny::selectInput(ns("type"), "Type", choices = with_blank(REQ_TYPES)),
-                        shiny::selectInput(ns("verify"), "Verify by", choices = with_blank(VERIFY_METHODS)),
+                        shiny::selectInput(ns("parent"), "Parent", choices = with_blank(character(0), "None"), selectize = FALSE),
+                        shiny::selectInput(ns("level"), "Level", choices = REQ_LEVELS, selectize = FALSE),
+                        shiny::selectInput(ns("type"), "Type", choices = with_blank(REQ_TYPES), selectize = FALSE),
+                        shiny::selectInput(ns("verify"), "Verify by", choices = with_blank(VERIFY_METHODS), selectize = FALSE),
                         shiny::textInput(ns("title"), "Short title")),
         shiny::tags$section(class = "mb-panel",
                             shiny::tags$div(class = "mb-label", "Parsed sentence"),
                             shiny::uiOutput(ns("sentence"))),
-        shiny::uiOutput(ns("gate")),
         shiny::uiOutput(ns("terms")),
-        shiny::tags$div(style = "display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px",
+        # Commit stays in reach however long the page gets (UX review §2.1).
+        shiny::tags$div(class = "mb-sticky-actions",
                         shiny::actionButton(ns("commit"), "Commit to specification", class = "mb-btn mb-btn-primary", disabled = TRUE,
                                             onclick = send_draft_js(ns("commit_request"), ns("text"))),
                         shiny::actionButton(ns("save_draft"), "Save draft", class = "mb-btn",
                                             onclick = send_draft_js(ns("save_request"), ns("text"))),
                         shiny::uiOutput(ns("commit_note"), class = "mb-caption"))
       ),
-      shiny::tags$aside(class = "mb-right",
-                        shiny::uiOutput(ns("coach")),
-                        shiny::uiOutput(ns("scope_gaps")))
+      # The checks column: the gate (code, every edit), then the coach (AI).
+      side_column("right", "write.checks", "Checks", width = 380,
+                  shiny::uiOutput(ns("gate")),
+                  shiny::uiOutput(ns("coach")),
+                  shiny::uiOutput(ns("scope_gaps")))
     )
   )
 }
@@ -73,14 +71,14 @@ mod_write_ears_ui <- function(ns) {
     class = "mb-panel",
     shiny::tags$div(class = "mb-label", "EARS builder"),
     shiny::tags$div(class = "mb-fields",
-                    shiny::selectInput(ns("ears_pattern"), "Pattern", choices = EARS_PATTERNS),
+                    shiny::selectInput(ns("ears_pattern"), "Pattern", choices = EARS_PATTERNS, selectize = FALSE),
                     shiny::textInput(ns("ears_trigger"), "Trigger, state or condition"),
-                    shiny::selectInput(ns("ears_actor"), "Actor", choices = with_blank(character(0), "Choose an element"))),
+                    shiny::selectInput(ns("ears_actor"), "Actor", choices = with_blank(character(0), "Choose an element"), selectize = FALSE)),
     shiny::textInput(ns("ears_response"), "Response", width = "100%"),
     shiny::tags$div(class = "mb-fields",
-                    shiny::selectInput(ns("ears_bound"), "Bound", choices = c("within", "at least", "no more than", "no less than")),
+                    shiny::selectInput(ns("ears_bound"), "Bound", choices = c("within", "at least", "no more than", "no less than"), selectize = FALSE),
                     shiny::textInput(ns("ears_value"), "Value", placeholder = "[value]"),
-                    shiny::selectInput(ns("ears_unit"), "Unit", choices = with_blank(EARS_UNIT_CHOICES, "None"))),
+                    shiny::selectInput(ns("ears_unit"), "Unit", choices = with_blank(EARS_UNIT_CHOICES, "None"), selectize = FALSE)),
     shiny::tags$div(shiny::actionButton(ns("ears_use"), "Put the sentence in the draft", class = "mb-btn"))
   )
 }
@@ -214,12 +212,17 @@ mod_write_server <- function(id, state, debounce_ms = 50, coach_ms = NULL) {
       dismiss_proposal(con(), id, input$coach_dismiss_reason)
       invalidate_db(state, "ai")
     })
+    # A draft started from an AI sketch keeps the sketch open until it's saved.
+    started_from <- shiny::reactiveVal(NULL)
     shiny::observeEvent(input$gap_draft, {
-      draft_text <- guarded_edit(start_from_sketch(con(), input$gap_draft))
+      proposal <- input$gap_draft
+      draft_text <- guarded_edit(start_from_sketch(con(), proposal))
       if (!is.null(draft_text)) {
-        clear_form()
-        shiny::updateTextAreaInput(session, "text", value = draft_text)
-        invalidate_db(state, "ai")
+        replace_page(function() {
+          clear_form()
+          started_from(proposal)
+          shiny::updateTextAreaInput(session, "text", value = draft_text)
+        })
       }
     })
     shiny::observeEvent(input$gap_dismiss, ask_dismiss(ns, input$gap_dismiss, "gap_dismiss_confirm", "gap_dismiss_reason"))
@@ -306,25 +309,63 @@ mod_write_server <- function(id, state, debounce_ms = 50, coach_ms = NULL) {
     }
     clear_form <- function() {
       editing(NULL)
+      started_from(NULL)
       shiny::updateTextAreaInput(session, "text", value = "")
       shiny::updateSelectInput(session, "type", selected = "")
       shiny::updateSelectInput(session, "verify", selected = "")
       shiny::updateTextInput(session, "title", value = "")
     }
-    shiny::observeEvent(input$open, load_requirement(input$open))
-    shiny::observeEvent(input$new, {
+    # Text on the page that isn't saved anywhere: replacing it asks first (review F4).
+    unsaved <- function() {
+      text <- stringr::str_squish(if (is.null(input$text)) "" else input$text)
+      if (!nzchar(text)) return(FALSE)
+      saved <- if (is.null(editing())) "" else stringr::str_squish(read_entity(con(), "requirement", editing())$text %||% "")
+      !identical(text, saved)
+    }
+    pending_replace <- shiny::reactiveVal(NULL)
+    replace_page <- function(action) {
+      if (!unsaved()) return(action())
+      pending_replace(action)
+      shiny::showModal(shiny::modalDialog(
+        title = "Discard the text on the page?",
+        shiny::tags$p("The draft on the page isn't saved. Save draft keeps it; Discard replaces it."),
+        footer = shiny::tagList(shiny::modalButton("Keep editing"), shiny::actionButton(ns("replace_confirm"), "Discard", class = "mb-btn mb-btn-primary"))
+      ))
+    }
+    shiny::observeEvent(input$replace_confirm, {
+      shiny::removeModal()
+      action <- pending_replace()
+      pending_replace(NULL)
+      if (!is.null(action)) action()
+    })
+    shiny::observeEvent(input$open, {
+      id <- input$open
+      replace_page(function() load_requirement(id))
+    })
+    # A draft belongs to its project: switching projects starts a clean page, so a commit
+    # can't write this text over the other project's requirement with the same id.
+    shiny::observeEvent(con(), {
       last_commit(NULL)
       clear_form()
+    }, ignoreInit = TRUE)
+    shiny::observeEvent(input$new, {
+      replace_page(function() {
+        last_commit(NULL)
+        clear_form()
+      })
     })
     shiny::observeEvent(state$open_in_write(), {
       target <- state$open_in_write()
-      if (is.list(target)) {
-        clear_form()
-        shiny::updateTextAreaInput(session, "text", value = target$text)
-      } else {
-        load_requirement(target)
-      }
       state$open_in_write(NULL)
+      replace_page(function() {
+        if (is.list(target)) {
+          clear_form()
+          started_from(target$proposal)
+          shiny::updateTextAreaInput(session, "text", value = target$text)
+        } else {
+          load_requirement(target)
+        }
+      })
     }, ignoreNULL = TRUE)
 
     form_fields <- function() {
@@ -344,6 +385,12 @@ mod_write_server <- function(id, state, debounce_ms = 50, coach_ms = NULL) {
                                                  coach_state = if (reviewed) "reviewed" else "uncoached",
                                                  assessed_text = if (reviewed) held$text, coach_call_id = if (reviewed) held$call_id))
       if (is.null(written)) return()
+      push_edit(state, written, sprintf("commit %s", written$id))
+      if (!is.null(started_from())) {
+        keep_started_sketch(con(), started_from(), written$id)
+        started_from(NULL)
+        invalidate_db(state, "ai")
+      }
       if (reviewed) record_conflicts(con(), written$id, held$answer, held$call_id)
       last_commit(written$id)
       invalidate_db(state, written$area)
@@ -357,6 +404,12 @@ mod_write_server <- function(id, state, debounce_ms = 50, coach_ms = NULL) {
     shiny::observeEvent(input$save_request, {
       written <- guarded_edit(save_draft(con(), input$save_request$text, editing(), form_fields()))
       if (is.null(written)) return()
+      push_edit(state, written, sprintf("save draft %s", written$id))
+      if (!is.null(started_from())) {
+        keep_started_sketch(con(), started_from(), written$id)
+        started_from(NULL)
+        invalidate_db(state, "ai")
+      }
       editing(written$id)
       invalidate_db(state, written$area)
     })
@@ -382,15 +435,16 @@ mod_write_server <- function(id, state, debounce_ms = 50, coach_ms = NULL) {
       units <- with_blank(DBI::dbGetQuery(con(), "SELECT symbol FROM unit ORDER BY symbol")$symbol, "None")
       fields <- switch(
         action$action,
-        property = shiny::tagList(shiny::selectInput(ns("term_element"), "Property of", choices = with_blank(element_choices, "Choose an element")),
-                                  shiny::selectInput(ns("term_unit"), "Unit", choices = units)),
+        property = shiny::tagList(shiny::selectInput(ns("term_element"), "Property of", choices = with_blank(element_choices, "Choose an element"), selectize = FALSE),
+                                  shiny::selectInput(ns("term_unit"), "Unit", choices = units, selectize = FALSE)),
         field = {
           interfaces <- DBI::dbGetQuery(con(), "SELECT id, name FROM interface WHERE layer = 'physical' ORDER BY name")
-          shiny::tagList(shiny::selectInput(ns("term_interface"), "Field of", choices = with_blank(stats::setNames(interfaces$id, interfaces$name), "Choose an interface")),
-                         shiny::selectInput(ns("term_type"), "Type", choices = c("float32", "float64", "int32", "uint32", "uint64", "bool", "string")),
-                         shiny::selectInput(ns("term_unit"), "Unit", choices = units))
+          shiny::tagList(shiny::selectInput(ns("term_interface"), "Field of", choices = with_blank(stats::setNames(interfaces$id, interfaces$name), "Choose an interface"),
+                                            selectize = FALSE),
+                         shiny::selectInput(ns("term_type"), "Type", choices = c("float32", "float64", "int32", "uint32", "uint64", "bool", "string"), selectize = FALSE),
+                         shiny::selectInput(ns("term_unit"), "Unit", choices = units, selectize = FALSE))
         },
-        component = shiny::selectInput(ns("term_parent"), "Part of", choices = with_blank(element_choices, "Top level"))
+        component = shiny::selectInput(ns("term_parent"), "Part of", choices = with_blank(element_choices, "Top level"), selectize = FALSE)
       )
       shiny::showModal(shiny::modalDialog(
         title = sprintf("%s: %s", sub("…$", "", TERM_ACTION_LABELS[[action$action]]), action$term),
@@ -417,7 +471,10 @@ mod_write_server <- function(id, state, debounce_ms = 50, coach_ms = NULL) {
         component = add_term_as_component(con(), action$term, parent)
       ))
       pending_term(NULL)
-      if (!is.null(written)) invalidate_db(state, "model")
+      if (!is.null(written)) {
+        push_edit(state, written, sprintf("add %s", action$term))
+        invalidate_db(state, "model")
+      }
     })
 
     invisible(list(gate = gate, commit_info = commit_info, editing = editing, review = current_review, failure = current_failure))

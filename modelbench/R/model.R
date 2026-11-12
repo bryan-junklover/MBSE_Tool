@@ -30,6 +30,95 @@ element_properties <- function(con, element_id) {
      WHERE v.owner_kind = 'element' AND v.owner_id = ? ORDER BY d.label", params = list(element_id))
 }
 
+# Components a component can move under: any other component except itself and the parts
+# inside it.
+move_targets <- function(con, element_id) {
+  rows <- DBI::dbGetQuery(con, "SELECT id, name, parent_id FROM element WHERE kind = 'component' ORDER BY sort_order, name")
+  inside <- element_id
+  repeat {
+    more <- setdiff(rows$id[rows$parent_id %in% inside], inside)
+    if (length(more) == 0L) break
+    inside <- c(inside, more)
+  }
+  rows[!rows$id %in% inside, c("id", "name"), drop = FALSE]
+}
+
+# Re-checks the connectors on every port of these elements, refusing with the first that
+# no longer fits.
+recheck_connectors <- function(con, element_ids) {
+  connectors <- DBI::dbGetQuery(con, sprintf("
+    SELECT DISTINCT c.id, c.source_port_id, c.target_port_id FROM connector c JOIN port p ON p.id IN (c.source_port_id, c.target_port_id)
+     WHERE p.element_id IN (%s)", paste(DBI::dbQuoteString(con, element_ids), collapse = ", ")))
+  for (i in seq_len(nrow(connectors))) {
+    check <- check_connector(con, connectors$source_port_id[i], connectors$target_port_id[i])
+    if (!check$ok) refuse(sprintf("Connector %s would no longer fit. %s", connectors$id[i], sub("^Can't connect: ", "", check$reason)))
+  }
+  invisible(TRUE)
+}
+
+# Moves a component under another one.
+move_element <- function(con, element_id, parent_id, author = "engineer") {
+  row <- read_entity(con, "element", element_id)
+  if (is.null(row) || row$kind != "component") refuse("Only a component can be moved.")
+  if (!parent_id %in% move_targets(con, element_id)$id) refuse("It can't go there: choose a component that isn't it or one of its own parts.")
+  if (identical(row$parent_id, parent_id)) return(NULL)
+  in_tx(con, {
+    written <- write_element(con, element_id, list(parent_id = parent_id), author, "Moved")
+    recheck_connectors(con, element_id)
+    written
+  })
+}
+
+# Removes a grouping: its parts move up to its parent, then the group goes, with its own
+# ports and connectors. Undo restores the group and puts the parts back.
+ungroup_element <- function(con, element_id, author = "engineer") {
+  row <- read_entity(con, "element", element_id)
+  if (is.null(row) || row$kind != "component") refuse("Only a component can be ungrouped.")
+  if (is.na(row$parent_id)) refuse(row$name, " is the whole system, so it can't be ungrouped.")
+  parts <- DBI::dbGetQuery(con, "SELECT id FROM element WHERE parent_id = ?", params = list(element_id))$id
+  if (length(parts) == 0L) refuse(row$name, " has no parts to ungroup.")
+  with_change_set(con, function(change_set) {
+    for (part in parts) write_element(con, part, list(parent_id = row$parent_id), author, sprintf("Ungrouped from %s", row$name), change_set)
+    delete_entity(con, "element", element_id, author, "Ungrouped", change_set)
+    recheck_connectors(con, parts)
+    list(change_set = change_set, id = element_id, area = "model")
+  })
+}
+
+# Changes a port's name, direction or interface. Its connectors are checked against the
+# change first, so a port can't be edited into a connection that no longer fits.
+save_port <- function(con, port_id, field, value, author = "engineer") {
+  port <- read_entity(con, "port", port_id)
+  if (is.null(port)) refuse("That port no longer exists.")
+  value <- if (is.null(value)) "" else trimws(value)
+  fields <- switch(field,
+    name = {
+      if (!nzchar(value)) refuse("A port needs a name.")
+      taken <- DBI::dbGetQuery(con, "SELECT 1 FROM port WHERE element_id = ? AND name = ? AND id <> ?", params = list(port$element_id, value, port_id))
+      if (nrow(taken) > 0L) refuse("This component already has a port called ", value, ".")
+      list(name = value)
+    },
+    direction = {
+      if (!value %in% c("in", "out", "inout")) refuse("A port's direction is in, out or inout.")
+      list(direction = value)
+    },
+    interface_id = {
+      if (nzchar(value) && is.null(read_entity(con, "interface", value))) refuse("That interface no longer exists.")
+      list(interface_id = if (nzchar(value)) value else NA_character_)
+    },
+    refuse("A port's ", field, " can't be changed here."))
+  connectors <- DBI::dbGetQuery(con, "SELECT id, source_port_id, target_port_id FROM connector WHERE source_port_id = ? OR target_port_id = ?",
+                                params = list(port_id, port_id))
+  in_tx(con, {
+    written <- write_port(con, port_id, fields, author, "Port edited")
+    for (i in seq_len(nrow(connectors))) {
+      check <- check_connector(con, connectors$source_port_id[i], connectors$target_port_id[i])
+      if (!check$ok) refuse(sprintf("Its connector %s would no longer fit. %s Remove the connector first.", connectors$id[i], sub("^Can't connect: ", "", check$reason)))
+    }
+    written
+  })
+}
+
 element_ports <- function(con, element_id) {
   DBI::dbGetQuery(con, "
     SELECT p.id, p.name, p.direction, p.side, p.interface_id, i.name AS interface,
@@ -64,6 +153,16 @@ set_property_value <- function(con, value_id, value, author = "engineer") {
 }
 
 # A human adds a property with no value yet: a placeholder, shown as [value].
+# A property on a connector, such as the voltage or power it carries: Flows shows it.
+add_property_to_connector <- function(con, connector_id, property_def_id, author = "engineer") {
+  def <- read_entity(con, "property_def", property_def_id)
+  if (is.null(def)) refuse("That property no longer exists.")
+  held <- DBI::dbGetQuery(con, "SELECT 1 FROM property_value WHERE owner_kind = 'connector' AND owner_id = ? AND property_def_id = ?", params = list(connector_id, property_def_id))
+  if (nrow(held) > 0L) refuse("This connector already has ", def$label, ".")
+  write_property_value(con, fields = list(owner_kind = "connector", owner_id = connector_id, property_def_id = property_def_id,
+                                          value_state = "placeholder", unit = def$unit), author = author)
+}
+
 add_property_to_element <- function(con, element_id, property_def_id, author = "engineer") {
   def <- read_entity(con, "property_def", property_def_id)
   write_property_value(con, fields = list(owner_kind = "element", owner_id = element_id, property_def_id = property_def_id,
@@ -113,6 +212,7 @@ filter_elements <- function(con, nodes, filter_json) {
   keep <- rep(TRUE, nrow(nodes))
   if (!is.null(filter$kinds)) keep <- keep & nodes$kind %in% filter$kinds
   if (!is.null(filter$stereotypes)) keep <- keep & nodes$stereotype %in% filter$stereotypes
+  if (!is.null(filter$domains)) keep <- keep & nodes$domain %in% filter$domains
   if (!is.null(filter$property)) {
     held <- DBI::dbGetQuery(con, "SELECT v.owner_id, v.num_value FROM property_value v JOIN property_def d ON d.id = v.property_def_id
                                    WHERE v.owner_kind = 'element' AND d.name = ? AND v.value_state = 'set'",
@@ -136,11 +236,12 @@ structure_view <- function(con, view_id = "VW-all", root = default_structure_roo
   view <- DBI::dbGetQuery(con, "SELECT * FROM view_def WHERE id = ?", params = list(view_id))
   filter_json <- if (nrow(view) == 1L) view$filter_json else NA_character_
   all <- DBI::dbGetQuery(con, "
-    SELECT e.id, e.name, e.kind, e.parent_id, e.multiplicity, e.review_state, e.origin, s.name AS stereotype
+    SELECT e.id, e.name, e.kind, e.parent_id, e.multiplicity, e.review_state, e.origin, e.domain, s.name AS stereotype
       FROM element e LEFT JOIN stereotype s ON s.id = e.stereotype_id")
   children <- all[if (is.na(root)) is.na(all$parent_id) else all$parent_id %in% root, , drop = FALSE]
   children <- children[children$kind != "function", , drop = FALSE]
-  if (include_external) children <- rbind(children, all[all$kind == "external" & is.na(all$parent_id), , drop = FALSE])
+  # At the top level, outside equipment is already among the children: add it once (review G1).
+  if (include_external) children <- rbind(children[children$kind != "external", , drop = FALSE], all[all$kind == "external" & is.na(all$parent_id), , drop = FALSE])
   nodes <- children[filter_elements(con, children, filter_json), , drop = FALSE]
 
   ports <- DBI::dbGetQuery(con, "
@@ -176,10 +277,13 @@ structure_view <- function(con, view_id = "VW-all", root = default_structure_roo
   edges$stub <- is.na(edges$source_holder) | is.na(edges$target_holder)
 
   unconnected <- DBI::dbGetQuery(con, "SELECT port_id, element_id, name FROM v_unconnected_ports")
-  nodes$gap <- nodes$id %in% unconnected$element_id
+  unhosted <- DBI::dbGetQuery(con, "SELECT id FROM v_unhosted_software")$id
+  nodes$gap <- nodes$id %in% c(unconnected$element_id, unhosted)
   nodes$gap_note <- vapply(nodes$id, function(id) {
     held <- unconnected$name[unconnected$element_id == id]
-    if (length(held) == 0L) NA_character_ else sprintf("%s has no connector", paste(held, collapse = ", "))
+    notes <- c(if (length(held) > 0L) sprintf("%s has no connector", paste(held, collapse = ", ")),
+               if (id %in% unhosted) "Nothing recorded for it to run on")
+    if (length(notes) == 0L) NA_character_ else paste(notes, collapse = "; ")
   }, "", USE.NAMES = FALSE)
 
   stored <- layout_rows(con, view_id)
@@ -328,6 +432,7 @@ model_health <- function(con) {
           SELECT 1 FROM link l WHERE l.link_type = 'satisfied_by' AND l.target_id = e.id)",
         as.character(DBI::dbQuoteString(con, if (is.na(top)) "" else top)))),
       interfaces = count_of(con, "SELECT count(*) AS n FROM interface WHERE layer = 'physical'"),
+      unhosted = count_of(con, "SELECT count(*) AS n FROM v_unhosted_software"),
       gate_findings = nrow(element_gate_findings(con))
     ),
     functional = list(
@@ -341,6 +446,12 @@ model_health <- function(con) {
       missing_fields = nrow(missing_field_steps(con)),
       unhandled = count_of(con, "SELECT count(*) AS n FROM v_sm_unhandled")
     ),
+    failures = local({
+      findings <- failure_findings(con)
+      list(modes = count_of(con, "SELECT count(*) AS n FROM failure_mode"),
+           open = sum(findings$rule %in% c("open_response", "handled_unlinked", "handled_unverified")),
+           missing = sum(findings$rule %in% WAIVABLE_RULES))
+    }),
     budgets = budget_status(con),
     analyses = analysis_status(con),
     ai = list(
@@ -434,7 +545,13 @@ flow_label <- function(connector_id, label, rate_value, rate_unit, quantities) {
 flows_view <- function(con, flow_types = c("data", "energy", "matter"), root = default_structure_root(con), quantities = TRUE) {
   view <- structure_view(con, "VW-flows", root, include_external = TRUE)
   connected <- unique(c(view$edges$source_holder, view$edges$target_holder))
-  view$nodes <- view$nodes[view$nodes$kind != "external" | view$nodes$id %in% connected, , drop = FALSE]
+  # Outside equipment shows where it connects at this level, or where it's been placed on
+  # this diagram, so a new one stays on screen to be wired up.
+  placed <- layout_rows(con, "VW-flows")
+  placed <- placed$item_id[placed$item_kind == "element"]
+  view$nodes <- view$nodes[view$nodes$kind != "external" | view$nodes$id %in% connected |
+                             (view$nodes$id %in% placed & !view$nodes$id %in% DBI::dbGetQuery(con, "
+                               SELECT DISTINCT p.element_id FROM port p JOIN connector c ON c.source_port_id = p.id OR c.target_port_id = p.id")$element_id), , drop = FALSE]
   view$ports <- view$ports[view$ports$element_id %in% view$nodes$id, , drop = FALSE]
   edges <- view$edges[view$edges$flow_type %in% flow_types, , drop = FALSE]
   if (quantities && nrow(edges) > 0L) {
@@ -607,6 +724,67 @@ allocation_matrix <- function(con) {
   links <- DBI::dbGetQuery(con, "SELECT id, source_id, target_id FROM link WHERE link_type = 'allocated_to' AND source_kind = 'element'")
   rows$unallocated <- !rows$id %in% links$source_id
   list(rows = rows, columns = columns, links = links)
+}
+
+# --- Software and the hardware it runs on (hosted_on links) ---
+
+# Hosts are hardware components, or external equipment the system doesn't own.
+host_choices <- function(con, element_id = NA_character_) {
+  hosts <- DBI::dbGetQuery(con, "SELECT id, name FROM element
+                                  WHERE (kind = 'component' AND domain IN ('hw', 'hw_sw')) OR kind = 'external'
+                                  ORDER BY kind = 'external', sort_order, name")
+  hosts[!hosts$id %in% c(element_id, default_structure_root(con)), , drop = FALSE]
+}
+
+# Why `element_id` can't run on `host_id`, or NA when it can.
+hosting_problem <- function(con, element_id, host_id) {
+  element <- DBI::dbGetQuery(con, "SELECT id, name, kind, domain FROM element WHERE id = ?", params = list(element_id))
+  host <- DBI::dbGetQuery(con, "SELECT id, name, kind, domain FROM element WHERE id = ?", params = list(host_id))
+  if (nrow(element) == 0L) return(sprintf("%s isn't in the model.", element_id))
+  if (nrow(host) == 0L) return(sprintf("%s isn't in the model.", host_id))
+  if (element$kind != "component" || !identical(element$domain, "sw")) {
+    return(sprintf("%s isn't a software component, so it doesn't run on anything. Set its domain to Software first.", element$name))
+  }
+  if (identical(element_id, host_id)) return(sprintf("%s can't run on itself.", element$name))
+  if (!(host$kind == "external" || (host$kind == "component" && host$domain %in% c("hw", "hw_sw")))) {
+    return(sprintf("%s can't run on %s, which isn't hardware.", element$name, host$name))
+  }
+  NA_character_
+}
+
+# Records where software runs. One host each: a new host replaces the old one, and an
+# empty `host_id` clears it.
+host_software <- function(con, element_id, host_id, author = "engineer") {
+  if (!is.null(host_id) && nzchar(host_id)) {
+    problem <- hosting_problem(con, element_id, host_id)
+    if (!is.na(problem)) stop(problem, call. = FALSE)
+  }
+  with_change_set(con, function(change_set) {
+    old <- DBI::dbGetQuery(con, "SELECT id FROM link WHERE link_type = 'hosted_on' AND source_kind = 'element' AND source_id = ?",
+                           params = list(element_id))$id
+    for (id in old) delete_entity(con, "link", id, author, NULL, change_set)
+    if (is.null(host_id) || !nzchar(host_id)) return(list(change_set = change_set, id = NA_character_, area = "model"))
+    write_link(con, fields = list(link_type = "hosted_on", source_kind = "element", source_id = element_id,
+                                  target_kind = "element", target_id = host_id), author = author, change_set = change_set)
+  })
+}
+
+software_host <- function(con, element_id) {
+  DBI::dbGetQuery(con, "SELECT l.id, e.id AS host_id, e.name FROM link l JOIN element e ON e.id = l.target_id
+                         WHERE l.link_type = 'hosted_on' AND l.source_kind = 'element' AND l.source_id = ?", params = list(element_id))
+}
+
+hosted_software <- function(con, host_id) {
+  DBI::dbGetQuery(con, "SELECT e.id, e.name FROM link l JOIN element e ON e.id = l.source_id
+                         WHERE l.link_type = 'hosted_on' AND l.target_kind = 'element' AND l.target_id = ? ORDER BY e.sort_order, e.name",
+                  params = list(host_id))
+}
+
+# hosted_on links that no longer make sense, say after a domain changed.
+hosting_findings <- function(con) {
+  links <- DBI::dbGetQuery(con, "SELECT id, source_id, target_id FROM link WHERE link_type = 'hosted_on'")
+  problems <- vapply(seq_len(nrow(links)), function(i) hosting_problem(con, links$source_id[i], links$target_id[i]), "")
+  data.frame(kind = rep("link", sum(!is.na(problems))), id = links$id[!is.na(problems)], problem = problems[!is.na(problems)])
 }
 
 realize_flow <- function(con, flow_id, connector_id, author = "engineer") {

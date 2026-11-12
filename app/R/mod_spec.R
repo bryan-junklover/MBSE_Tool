@@ -1,68 +1,94 @@
 # Write › Specification: outline, table, inspector, and import with a triage queue.
 
-mod_spec_ui <- function(id) {
+export_menu <- function(...) {
+  shiny::tags$details(class = "mb-menu", shiny::tags$summary(class = "mb-btn", "Export ▾"),
+                      shiny::tags$div(class = "mb-menu-list", role = "group", `aria-label` = "Export", ...))
+}
+
+mod_spec_ui <- function(id, tabs = NULL) {
   ns <- shiny::NS(id)
   shiny::tagList(
-    shiny::tags$div(
-      class = "mb-tabbar",
-      shiny::textInput(ns("search"), NULL, placeholder = "Search ID or text", width = "200px"),
-      shiny::selectInput(ns("type"), NULL, choices = c("All types" = "all", REQ_TYPES), width = "160px"),
+    screen_bar(
+      tabs,
+      aria_label(shiny::textInput(ns("search"), NULL, placeholder = "Search ID or text", width = "200px"), "input", "Search ID or text"),
+      aria_label(shiny::selectInput(ns("type"), NULL, choices = c("All types" = "all", REQ_TYPES), width = "150px", selectize = FALSE), "select", "Type"),
       shiny::checkboxInput(ns("low_first"), "Lowest score first", value = TRUE),
-      shiny::tags$div(class = "mb-actions",
-                      htmltools::tagQuery(shiny::fileInput(ns("import"), NULL, buttonLabel = "Import…", placeholder = "csv, xlsx or txt",
-                                                           accept = c(".csv", ".xlsx", ".txt"), width = "260px"))$
-                        find("input.form-control")$addAttrs(`aria-label` = "File to import")$allTags(),
-                      shiny::actionButton(ns("add"), "+ Requirement", class = "mb-btn"),
-                      shiny::tags$div(role = "group", `aria-label` = "Export", class = "mb-head",
-                                      shiny::tags$span(class = "mb-caption", "Export"),
-                                      export_button(ns("export_reqif"), "ReqIF"), export_button(ns("export_csv"), "CSV"),
-                                      export_button(ns("export_md"), "Markdown"), export_button(ns("export_pdf"), "PDF")))
+      actions = shiny::tagList(
+        # A plain button that opens the file picker; the picker's text box isn't needed (§2.6).
+        shiny::tags$div(class = "mb-import",
+                        htmltools::tagQuery(shiny::fileInput(ns("import"), NULL, buttonLabel = "Import…", placeholder = "csv, xlsx or txt",
+                                                             accept = c(".csv", ".xlsx", ".txt")))$
+                          find("input")$filter(function(x, i) identical(x$attribs$type, "file"))$addAttrs(`aria-label` = "Import requirements from a csv, xlsx or txt file")$allTags()),
+        export_menu(export_button(ns("export_reqif"), "ReqIF"), export_button(ns("export_csv"), "CSV"),
+                    export_button(ns("export_md"), "Markdown"), export_button(ns("export_pdf"), "PDF")),
+        shiny::actionButton(ns("add"), "+ Requirement", class = "mb-btn mb-btn-primary mb-btn-compact")
+      )
     ),
     shiny::tags$div(
       class = "mb-body",
-      shiny::tags$aside(class = "mb-left",
-                        shiny::tags$div(class = "mb-label", "Outline"),
-                        shiny::uiOutput(ns("outline"))),
+      side_column("left", "spec.outline", "Outline", width = 260,
+                  shiny::tags$div(class = "mb-label", "Outline"),
+                  shiny::uiOutput(ns("outline"))),
       shiny::tags$main(class = "mb-main",
                        shiny::uiOutput(ns("triage")),
                        shiny::tags$div(class = "mb-table", reactable::reactableOutput(ns("table"))),
                        shiny::textOutput(ns("count"))),
-      shiny::tags$aside(class = "mb-right", shiny::uiOutput(ns("inspector")))
+      # Hidden until a requirement is chosen, so the table has the room (§2.5).
+      side_column("right", "spec.inspector", "Details", width = 360, auto = TRUE, shiny::uiOutput(ns("inspector")))
     )
   )
 }
 
 # reactable columns. Gaps are amber text with a word, never colour alone.
-spec_columns <- function() {
+spec_columns <- function(coach_state = character(0)) {
   gap_text <- function(value, label) {
     if (is.na(value) || !nzchar(value)) shiny::tags$span(class = "mb-gap", label) else value
   }
   list(
     id = reactable::colDef(name = "ID", width = 85, class = "mono"),
-    text = reactable::colDef(name = "Requirement", minWidth = 220),
-    req_type = reactable::colDef(name = "Type", width = 95, cell = function(value) gap_text(value, "missing")),
-    verification_method = reactable::colDef(name = "Verify by", width = 105, cell = function(value) gap_text(value, "missing")),
+    text = reactable::colDef(name = "Requirement", minWidth = 180),
+    req_type = reactable::colDef(name = "Type", width = 100, style = list(whiteSpace = "nowrap"), cell = function(value) gap_text(value, "missing")),
+    verification_method = reactable::colDef(name = "Verify by", width = 110, style = list(whiteSpace = "nowrap"), cell = function(value) gap_text(value, "missing")),
     allocated_to = reactable::colDef(name = "Allocated to", minWidth = 110, cell = function(value) gap_text(value, "none")),
-    status = reactable::colDef(name = "Status", width = 85),
-    gate_score = reactable::colDef(name = "Score", width = 60, class = "mono", cell = function(value, index) {
+    status = reactable::colDef(name = "Status", width = 90, cell = function(value, index) {
+      # A committed requirement nobody coached says so (review F5).
+      if (identical(value, "committed") && identical(coach_state[index], "uncoached")) shiny::tagList(value, shiny::tags$div(class = "mb-gap", style = "font-size:11px", "uncoached")) else value
+    }),
+    gate_score = reactable::colDef(name = "Score", width = 64, style = list(whiteSpace = "nowrap"), class = "mono", cell = function(value, index) {
       if (is.na(value)) return("")
       if (value < 50L) shiny::tags$span(class = "mb-gap", style = "font-weight:500", value) else value
     })
   )
 }
 
-render_evidence <- function(cases, ns) {
+render_evidence <- function(cases, ns, checks = NULL) {
   shiny::tags$section(
     class = "mb-panel",
     shiny::tags$div(class = "mb-head", shiny::tags$b("Verification"),
                     shiny::tags$button(type = "button", class = "mb-btn mb-btn-small mb-push", onclick = event_js(ns("add_case"), "new"), "Add test case…")),
-    if (nrow(cases) == 0L) shiny::tags$span(class = "mb-caption", "No test cases yet."),
-    lapply(seq_len(nrow(cases)), function(i) {
-      case <- cases[i, ]
+    if (nrow(cases) == 0L && (is.null(checks) || nrow(checks) == 0L)) shiny::tags$span(class = "mb-caption", "No test cases or assertions yet."),
+    # Assertions verify by simulation: checked now, and as last recorded.
+    if (!is.null(checks)) lapply(seq_len(nrow(checks)), function(i) {
+      check <- checks[i, ]
       shiny::tags$div(
         style = "display:flex;flex-direction:column;gap:4px",
-        shiny::tags$div(class = "mb-head", shiny::tags$span(class = "mono", case$id), shiny::tags$span(case$name),
-                        shiny::tags$button(type = "button", class = "mb-btn mb-btn-small mb-push", onclick = event_js(ns("record"), case$id), "Record a result…")),
+        shiny::tags$div(class = "mb-head", shiny::tags$span(class = "mono", check$id), shiny::tags$span(sprintf("%s · %s", check$machine, check$description))),
+        shiny::tags$span(class = if (check$live == "pass") "mb-check-pass" else "mb-check-fail", sprintf("Now: %s · %s", toupper(check$live), check$live_message)),
+        shiny::tags$span(class = "mb-caption", if (is.na(check$recorded)) "Not recorded yet. Run and record it on State machines." else sprintf("Recorded %s · %s", toupper(check$recorded), check$run_at))
+      )
+    }),
+    lapply(seq_len(nrow(cases)), function(i) {
+      case <- cases[i, ]
+      change <- function(field) change_js(ns("case_change"), list(id = case$id, field = field))
+      shiny::tags$div(
+        style = "display:flex;flex-direction:column;gap:4px",
+        shiny::tags$div(class = "mb-event-row", shiny::tags$span(class = "mono", case$id),
+                        shiny::tags$input(type = "text", value = case$name, onchange = change("name"), `aria-label` = paste("Name of", case$id)),
+                        select_tag(VERIFY_METHODS, case$method, change("method"), label = paste("Method of", case$id)),
+                        shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", onclick = event_js(ns("record"), case$id), "Record a result…"),
+                        confirm_button("Unlink", ns("case_unlink"), case$id, sprintf("Unlink %s?", case$id),
+                                       "It no longer verifies this requirement. Its recorded results stay as history but stop counting, so stale ones stop blocking a baseline. Undo links it again.",
+                                       confirm = "Unlink", class = "mb-btn mb-btn-small")),
         shiny::tags$span(class = "mb-caption", if (is.na(case$result)) "No result recorded." else sprintf("%s · %s", toupper(case$result), case$recorded_at)),
         if (!is.na(case$stale)) shiny::tags$span(class = "mb-gap", style = "font-size:12px", sprintf("Stale evidence: %s", case$stale))
       )
@@ -91,10 +117,11 @@ mod_spec_server <- function(id, state) {
     })
 
     output$table <- reactable::renderReactable({
+      coach <- filtered()$coach_state
       data <- filtered()[, c("id", "text", "req_type", "verification_method", "allocated_to", "status", "gate_score")]
       chosen <- selected()
       reactable::reactable(
-        data, columns = spec_columns(), pagination = FALSE, highlight = TRUE, compact = TRUE, borderless = FALSE,
+        data, columns = spec_columns(coach), pagination = FALSE, highlight = TRUE, compact = TRUE, borderless = FALSE,
         onClick = reactable::JS(sprintf("function(rowInfo) { Shiny.setInputValue('%s', rowInfo.original.id, {priority: 'event'}); }", ns("select"))),
         rowStyle = function(index) {
           if (identical(data$id[index], chosen)) list(outline = "2px solid var(--ink)", outlineOffset = "-2px", background = "var(--surface-muted)")
@@ -111,6 +138,7 @@ mod_spec_server <- function(id, state) {
       render_outline(requirement_outline(con()), ns("select"), selected())
     })
     shiny::observeEvent(input$select, selected(input$select))
+    shiny::observe(reveal_column(session, "inspector", !is.null(selected())))
 
     # --- Inspector: details save on change ---
     current <- shiny::reactive({
@@ -135,49 +163,140 @@ mod_spec_server <- function(id, state) {
           shiny::tags$div(class = "mono mb-caption", sprintf("%s · %s", id, row$status)),
           shiny::tags$div(style = "font-size:16px;line-height:1.4", row$text)
         ),
-        shiny::textInput(ns("d_title"), "Short title", value(row$short_title)),
-        shiny::selectInput(ns("d_parent"), "Parent", choices = with_blank(parents, "None"), selected = value(row$parent_id)),
-        shiny::selectInput(ns("d_type"), "Type", choices = with_blank(REQ_TYPES), selected = value(row$req_type)),
-        shiny::selectInput(ns("d_verify"), "Verify by", choices = with_blank(VERIFY_METHODS), selected = value(row$verification_method)),
-        shiny::textAreaInput(ns("d_rationale"), "Rationale", value(row$rationale), rows = 3),
+        # Two fields a row once the column is wide enough (§2.7).
+        shiny::tags$div(class = "mb-field-grid",
+                        shiny::textInput(ns("d_title"), "Short title", value(row$short_title)),
+                        shiny::selectInput(ns("d_parent"), "Parent", choices = with_blank(parents, "None"), selected = value(row$parent_id), selectize = FALSE),
+                        shiny::selectInput(ns("d_type"), "Type", choices = with_blank(REQ_TYPES), selected = value(row$req_type), selectize = FALSE),
+                        shiny::selectInput(ns("d_verify"), "Verify by", choices = with_blank(VERIFY_METHODS), selected = value(row$verification_method), selectize = FALSE),
+                        shiny::selectInput(ns("d_level"), "Level", choices = c("Stakeholder" = "stakeholder", "System" = "system", "Subsystem" = "subsystem"),
+                                           selected = row$level, selectize = FALSE)),
+        shiny::uiOutput(ns("traces")),
+        shiny::tags$details(class = "mb-fold", open = if (nzchar(value(row$rationale))) NA,
+                            shiny::tags$summary("Rationale"),
+                            aria_label(shiny::textAreaInput(ns("d_rationale"), NULL, value(row$rationale), rows = 3, width = "100%"), "textarea", "Rationale")),
         shiny::uiOutput(ns("findings")),
         shiny::uiOutput(ns("evidence")),
-        shiny::actionButton(ns("rewrite"), "Rewrite it in Write", class = "mb-btn")
+        shiny::actionButton(ns("rewrite"), "Rewrite it in Write", class = "mb-btn"),
+        if (row$status == "committed" && identical(row$coach_state, "uncoached")) {
+          shiny::tagList(shiny::actionButton(ns("ask_coach"), "Ask the coach", class = "mb-btn mb-btn-ai"), shiny::uiOutput(ns("coach_result")))
+        },
+        danger_zone(if (row$status == "draft") {
+          confirm_button("Delete draft…", ns("delete_draft"), id, sprintf("Delete draft %s?", id),
+                         paste(delete_effects_text(shiny::isolate(delete_effects(con(), "requirement", id)))), confirm = "Delete draft")
+        } else {
+          shiny::actionButton(ns("deprecate"), "Deprecate…", class = "mb-btn")
+        })
       )
     })
+    # Coaching a committed requirement that was committed without one (review F5).
+    coach_task <- shiny::ExtendedTask$new(function(connection, text, parent) run_coach_async(connection, text, "req_light_check", parent))
+    coach_for <- shiny::reactiveVal(NULL)
+    shiny::observeEvent(input$ask_coach, {
+      row <- read_entity(con(), "requirement", selected())
+      coach_for(row$id)
+      coach_task$invoke(con(), row$text, if (is.na(row$parent_id)) NULL else row$parent_id)
+    })
+    output$coach_result <- shiny::renderUI({
+      if (coach_task$status() == "running") return(shiny::tags$span(class = "mb-caption", "The coach is reading it…"))
+      result <- coach_task$result()
+      if (!isTRUE(result$ok)) return(shiny::tags$span(class = "mb-gap", result$error %||% "The coach couldn't run."))
+      questions <- vapply(result$answer$questions %||% list(), function(q) q$text, "")
+      shiny::tags$div(class = "mb-caption",
+                      if (length(questions) > 0L) shiny::tagList("The coach asks:", shiny::tags$ul(lapply(questions, shiny::tags$li))) else "The coach has no questions.",
+                      "It's marked coached.")
+    })
+    shiny::observeEvent(coach_task$result(), {
+      result <- coach_task$result()
+      if (!isTRUE(result$ok) || is.null(coach_for())) return()
+      if (!is.null(model_edit(state, mark_requirement_coached(con(), coach_for(), result$text, result$call_id), "coach"))) invalidate_db(state, "ai")
+    })
+    shiny::observeEvent(input$delete_draft, {
+      if (!is.null(model_edit(state, delete_draft_requirement(con(), input$delete_draft), "delete draft"))) selected(NULL)
+    })
+    shiny::observeEvent(input$deprecate, {
+      shiny::showModal(shiny::modalDialog(
+        title = sprintf("Deprecate %s?", selected()),
+        shiny::tags$p("It leaves the specification, the gate counts and Health. Baselines and history keep it, and Undo brings it back.",
+                      "Its links stay, but failure modes it handles are no longer counted as handled by it."),
+        shiny::textAreaInput(ns("deprecate_reason"), "Why", width = "100%", rows = 2, placeholder = "Superseded by SYS-031"),
+        footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("deprecate_confirm"), "Deprecate", class = "mb-btn mb-btn-primary"))
+      ))
+    })
+    shiny::observeEvent(input$deprecate_confirm, {
+      if (is.null(model_edit(state, deprecate_requirement(con(), selected(), input$deprecate_reason), "deprecate"))) return()
+      shiny::removeModal()
+      selected(NULL)
+    })
+    # Traces to other requirements outside the parent tree (review B10).
+    output$traces <- shiny::renderUI({
+      row <- current()
+      shiny::req(row)
+      links <- requirement_links(con(), row$id)
+      others <- requirement_outline(con())
+      others <- others[others$id != row$id, ]
+      choices <- stats::setNames(others$id, ifelse(is.na(others$short_title), others$id, paste(others$id, others$short_title)))
+      shiny::tags$div(
+        lapply(c(derives_from = "Derives from", refines = "Refines"), function(label) {
+          type <- names(which(c(derives_from = "Derives from", refines = "Refines") == label))
+          mine <- links[links$link_type == type, , drop = FALSE]
+          shiny::tags$div(
+            shiny::tags$div(class = "mb-label", label),
+            lapply(seq_len(nrow(mine)), function(i) {
+              shiny::tags$div(class = "mb-event-row",
+                              shiny::tags$span(class = "mono", mine$target_id[i]), shiny::tags$span(if (is.na(mine$short_title[i])) "" else mine$short_title[i]),
+                              shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", `aria-label` = paste("Remove", label, mine$target_id[i]),
+                                                 onclick = event_js(ns("trace_remove"), mine$id[i]), "Remove"))
+            }),
+            select_tag(choices[!choices %in% mine$target_id], "", change_js(ns("trace_add"), list(type = type)), "Add…", label = paste(label, "another requirement"))
+          )
+        })
+      )
+    })
+    shiny::observeEvent(input$trace_add, {
+      if (nzchar(input$trace_add$value)) model_edit(state, link_requirements(con(), input$trace_add$type, selected(), input$trace_add$value), "trace")
+    })
+    shiny::observeEvent(input$trace_remove, model_edit(state, delete_entity(con(), "link", input$trace_remove), "remove trace"))
+    shiny::observeEvent(input$d_level, save_detail("level", input$d_level), ignoreInit = TRUE)
+
     output$findings <- shiny::renderUI({
       row <- current()
       shiny::req(row)
       db_dep(state, "model")
-      render_findings(requirement_findings(row, model_terms(con())))
+      parent_level <- if (is.na(row$parent_id)) NULL else read_entity(con(), "requirement", row$parent_id)$level
+      render_findings(requirement_findings(row, model_terms(con()), parent_level))
     })
 
     output$evidence <- shiny::renderUI({
       db_dep(state, "model")
       row <- current()
       shiny::req(row)
-      render_evidence(requirement_evidence(con(), row$id), ns)
+      db_dep(state, "behavior")
+      render_evidence(requirement_evidence(con(), row$id), ns, requirement_assertions(con(), row$id))
     })
     shiny::observeEvent(input$add_case, {
       shiny::showModal(shiny::modalDialog(
         title = "Add a test case",
         shiny::textInput(ns("case_name"), "Name"),
-        shiny::selectInput(ns("case_method"), "Method", choices = VERIFY_METHODS),
+        shiny::selectInput(ns("case_method"), "Method", choices = VERIFY_METHODS, selectize = FALSE),
         footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("case_confirm"), "Add test case", class = "mb-btn mb-btn-primary"))
       ))
     })
     shiny::observeEvent(input$case_confirm, {
       written <- guarded_edit(add_test_case(con(), selected(), input$case_name, input$case_method))
       if (is.null(written)) return()
+      push_edit(state, written, "add test case")
       shiny::removeModal()
       invalidate_db(state, c("spec", "model"))
     })
+    shiny::observeEvent(input$case_change, model_edit(state, update_test_case(con(), input$case_change$id, input$case_change$field, input$case_change$value), "edit test case"))
+    shiny::observeEvent(input$case_unlink, model_edit(state, unlink_test_case(con(), selected(), input$case_unlink), "unlink test case"))
     pending_case <- shiny::reactiveVal(NULL)
     shiny::observeEvent(input$record, {
       pending_case(input$record)
       shiny::showModal(shiny::modalDialog(
         title = sprintf("Record a result for %s", input$record),
-        shiny::selectInput(ns("record_result"), "Result", choices = c("Pass" = "pass", "Fail" = "fail", "Inconclusive" = "inconclusive")),
+        shiny::selectInput(ns("record_result"), "Result", choices = c("Pass" = "pass", "Fail" = "fail", "Inconclusive" = "inconclusive"), selectize = FALSE),
         shiny::textInput(ns("record_ref"), "Evidence reference", placeholder = "Report id, file or link"),
         shiny::textAreaInput(ns("record_note"), "Note"),
         shiny::tags$p(class = "mb-caption", "It's stored against the model as it stands now, and goes stale if anything it depended on changes."),
@@ -197,7 +316,10 @@ mod_spec_server <- function(id, state) {
       row <- shiny::isolate(current())
       if (is.null(row)) return(invisible(NULL))
       written <- guarded_edit(save_requirement_details(con(), row$id, stats::setNames(list(value), field)))
-      if (!is.null(written)) invalidate_db(state, written$area)
+      if (!is.null(written)) {
+        push_edit(state, written, sprintf("edit %s", row$id))
+        invalidate_db(state, written$area)
+      }
       invisible(NULL)
     }
     title_debounced <- shiny::debounce(shiny::reactive(input$d_title), 400)
@@ -225,7 +347,9 @@ mod_spec_server <- function(id, state) {
         import_requirements(con(), parsed, file$name)
       })
       if (is.null(result)) return()
-      import_note(sprintf("Imported %s: %d added as drafts, %d to fix.", file$name, length(result$added), result$queued))
+      push_edit(state, result, sprintf("import %s", file$name))
+      import_note(sprintf("Imported %s: %d added as drafts, %d to fix%s.", file$name, length(result$added), result$queued,
+                          if (result$skipped > 0L) sprintf(", %d already in the specification", result$skipped) else ""))
       invalidate_db(state, "spec")
     })
 

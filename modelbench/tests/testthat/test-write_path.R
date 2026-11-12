@@ -136,12 +136,14 @@ test_that("a re-created entity continues its revision history", {
   expect_identical(write_element(con, "C-1", list(kind = "component", name = "a"))$rev, 3L)
 })
 
-test_that("deletes that would break the model are refused", {
+test_that("deleting a parent takes its parts, and Undo brings them back", {
   con <- local_project()
   a <- new_element(con, "a")$id
-  new_element(con, "b", parent_id = a)
-  expect_error(delete_entity(con, "element", a), "constraint", ignore.case = TRUE)
-  expect_false(is.null(read_entity(con, "element", a)))
+  b <- new_element(con, "b", parent_id = a)$id
+  gone <- delete_entity(con, "element", a)
+  expect_null(read_entity(con, "element", b))
+  revert_change_set(con, gone$change_set, "engineer", "Undo")
+  expect_identical(read_entity(con, "element", b)$parent_id, a)
   expect_error(delete_entity(con, "element", "C-404"), class = "modelbench_refused")
 })
 

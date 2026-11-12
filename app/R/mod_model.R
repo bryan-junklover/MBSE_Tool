@@ -12,41 +12,66 @@ TOOL_HINTS <- c(select = "Drag port to port to connect · double-click a compone
 
 MODE_TOOLS <- list(
   structure = DIAGRAM_TOOLS,
-  flows = c("Select" = "select"),
+  flows = c("Select" = "select", "Outside equipment" = "component", "Port" = "port", "Connect" = "connect"),
   functional = c("Select" = "select", "Function" = "component", "Port" = "port", "Connect" = "connect")
 )
 
-mod_model_ui <- function(id, mode = "structure") {
+# A line sample beside each flow type, so the checkbox doubles as the legend (§2.13).
+flow_legend_label <- function(label, type) {
+  style <- switch(type, data = list(stroke = "#45484D", width = 2, dash = NA), energy = list(stroke = "#1C1D1F", width = 4, dash = NA),
+                  list(stroke = "#9A9DA3", width = 2, dash = "6 4"))
+  shiny::tags$span(style = "display:inline-flex;align-items:center;gap:8px",
+                   htmltools::tag("svg", list(width = 24, height = 10, `aria-hidden` = "true",
+                                              htmltools::tag("line", list(x1 = 0, y1 = 5, x2 = 24, y2 = 5, stroke = style$stroke, `stroke-width` = style$width,
+                                                                          `stroke-dasharray` = if (!is.na(style$dash)) style$dash)))),
+                   label)
+}
+
+mod_model_ui <- function(id, mode = "structure", tabs = NULL) {
   ns <- shiny::NS(id)
-  shiny::tags$div(
-    class = "mb-body",
-    shiny::tags$aside(class = "mb-left",
-                      if (mode == "flows") {
-                        shiny::tagList(
-                          shiny::checkboxGroupInput(ns("flow_types"), "Show", choices = c("Data" = "data", "Energy" = "energy", "Matter" = "matter"),
-                                                    selected = c("data", "energy", "matter")),
-                          shiny::checkboxInput(ns("quantities"), "Show flow quantities", value = TRUE),
-                          shiny::tags$span(class = "mb-caption", "Same components and ports as Structure; this view shows what moves along each connector."))
-                      },
-                      shiny::tags$div(class = "mb-label", if (mode == "functional") "Functions" else "Model tree"),
-                      shiny::uiOutput(ns("tree")),
-                      if (mode == "structure") shiny::selectInput(ns("view"), "Saved view", choices = c("All components" = "VW-all"))),
-    shiny::tags$main(
-      class = "mb-main",
-      shiny::uiOutput(ns("crumbs")),
-      shiny::tags$div(class = "mb-toolbar",
-                      shiny::uiOutput(ns("tools")),
-                      if (mode == "structure") shiny::actionButton(ns("group"), "Group into subsystem", class = "mb-btn"),
-                      shiny::actionButton(ns("undo"), "Undo", class = "mb-btn"),
-                      shiny::actionButton(ns("redo"), "Redo", class = "mb-btn"),
-                      shiny::actionButton(ns("auto_layout"), "Auto-layout", class = "mb-btn")),
-      shiny::tags$div(class = "mb-caption", shiny::textOutput(ns("hint"), inline = TRUE)),
-      shiny::tags$div(class = "mb-diagram", mbdiagramOutput(ns("diagram"), height = "560px")),
-      shiny::uiOutput(ns("facts")),
-      shiny::uiOutput(ns("connections")),
-      if (mode == "functional") shiny::uiOutput(ns("realisation"))
+  click <- function(input, label, ...) shiny::tags$button(type = "button", class = "mb-btn", onclick = event_js(ns(input), "go"), ..., label)
+  more <- shiny::tagList(
+    if (mode == "structure") click("group", "Group into subsystem", title = "Group the selected components into a new subsystem"),
+    click("auto_layout", "Auto-layout", title = "Lay the diagram out again; pinned blocks stay put")
+  )
+  shiny::tagList(
+    screen_bar(
+      tabs,
+      actions = shiny::tagList(
+        shiny::actionButton(ns("undo"), "Undo", class = "mb-btn", title = "Undo (⌘Z or Ctrl+Z on the canvas)"),
+        shiny::actionButton(ns("redo"), "Redo", class = "mb-btn", title = "Redo (⇧⌘Z or Ctrl+Shift+Z on the canvas)"),
+        shiny::tags$span(class = "mb-divider", `aria-hidden` = "true"),
+        shiny::tags$span(class = "mb-wide-only", more),
+        shiny::tags$details(class = "mb-menu mb-narrow-only",
+                            shiny::tags$summary(class = "mb-btn", `aria-label` = "More diagram actions", "More ▾"),
+                            shiny::tags$div(class = "mb-menu-list", more))
+      )
     ),
-    shiny::tags$aside(class = "mb-right", shiny::uiOutput(ns("inspector")))
+    shiny::tags$div(
+      class = "mb-body",
+      side_column("left", paste0(id, ".tree"), if (mode == "functional") "Functions" else "Model tree", width = 240,
+                  if (mode == "flows") {
+                    shiny::tagList(
+                      shiny::checkboxGroupInput(ns("flow_types"), "Show", choiceNames = list(flow_legend_label("Data", "data"), flow_legend_label("Energy", "energy"), flow_legend_label("Matter", "matter")),
+                                                choiceValues = c("data", "energy", "matter"), selected = c("data", "energy", "matter")),
+                      shiny::checkboxInput(ns("quantities"), "Show flow quantities", value = TRUE),
+                      shiny::tags$span(class = "mb-caption", "Same components and ports as Structure; this view shows what moves along each connector."))
+                  },
+                  shiny::tags$div(class = "mb-label", if (mode == "functional") "Functions" else "Model tree"),
+                  shiny::uiOutput(ns("tree")),
+                  if (mode == "structure") shiny::selectInput(ns("view"), "Saved view", choices = c("All components" = "VW-all"), selectize = FALSE)),
+      shiny::tags$main(
+        class = "mb-main",
+        shiny::tags$div(class = "mb-toolbar",
+                        shiny::uiOutput(ns("crumbs")),
+                        shiny::uiOutput(ns("tools")),
+                        shiny::tags$span(class = "mb-caption", shiny::textOutput(ns("hint"), inline = TRUE))),
+        shiny::tags$div(class = "mb-diagram", mbdiagramOutput(ns("diagram"))),
+        shiny::tags$div(class = "mb-canvas-foot", shiny::uiOutput(ns("facts"), inline = TRUE), shiny::uiOutput(ns("connections"))),
+        if (mode == "functional") shiny::uiOutput(ns("realisation"))
+      ),
+      side_column("right", paste0(id, ".inspector"), "Inspector", width = 340, shiny::uiOutput(ns("inspector")))
+    )
   )
 }
 
@@ -70,14 +95,21 @@ render_crumbs <- function(path, names, open_input) {
   }))
 }
 
+level_count <- function(view) sprintf("%d components on this level · %d connectors", nrow(view$nodes), nrow(view$edges))
+
+# The level's numbers. With nothing selected they fill the inspector (UX review §4.4).
 render_facts <- function(view, budgets, analyses, findings) {
   gaps <- sum(view$nodes$gap)
   shiny::tags$div(
-    class = "mb-facts",
-    shiny::tags$span(sprintf("%d components · %d connectors", nrow(view$nodes), nrow(view$edges))),
+    class = "mb-facts mb-facts-stack",
+    shiny::tags$div(class = "mb-label", "This level"),
+    shiny::tags$span(level_count(view)),
+    # Budgets are project-wide, so each names what it covers (review G7).
+    if (nrow(budgets) > 0L) shiny::tags$div(class = "mb-label", "Budgets"),
     lapply(seq_len(nrow(budgets)), function(i) {
-      shiny::tags$span(class = if (!budgets$pass[i]) "mb-gap",
-                       sprintf("%s %s%s", budgets$label[i], budgets$text[i], if (!budgets$pass[i]) " · FAIL" else ""))
+      incomplete <- !is.na(budgets$note[i]) && grepl("^excludes", budgets$note[i])
+      shiny::tags$span(class = if (!budgets$pass[i] || incomplete) "mb-gap",
+                       sprintf("%s over %s: %s", budgets$label[i], budgets$scope_name[i], budget_status_text(budgets$text[i], budgets$pass[i], budgets$note[i])))
     }),
     lapply(seq_len(nrow(analyses)), function(i) {
       shiny::tags$span(class = if (!analyses$pass[i]) "mb-gap",
@@ -121,7 +153,32 @@ select_tag <- function(choices, selected, onchange, blank = NULL, label = NULL) 
   }))
 }
 
-render_element_inspector <- function(row, properties, ports, requirements, stereotypes, addable, pinned, ns) {
+# Where software runs: a choice for software, a list for hardware that runs some.
+render_hosting <- function(hosting, ns) {
+  if (is.null(hosting)) return(NULL)
+  if (hosting$kind == "software") {
+    unhosted <- length(hosting$selected) == 0L
+    return(shiny::tagList(labelled("Runs on", select_tag(hosting$choices, if (unhosted) "" else hosting$selected,
+                                                         change_js(ns("host"), list()), "Not recorded", label = "Runs on")),
+                          if (unhosted) shiny::tags$span(class = "mb-gap", style = "font-size:13px", "Gap: nothing recorded for it to run on.")))
+  }
+  if (nrow(hosting$software) == 0L) return(NULL)
+  shiny::tagList(shiny::tags$div(class = "mb-label", "Software running here"),
+                 lapply(seq_len(nrow(hosting$software)), function(i) {
+                   shiny::tags$div(shiny::tags$span(class = "mono", hosting$software$id[i]), " ", hosting$software$name[i])
+                 }))
+}
+
+# Interfaces a port can take: physical ones for components and outside equipment,
+# functional ones for functions (review B11).
+port_interface_choices <- function(con, element_kind) {
+  layer <- if (identical(element_kind, "function")) "functional" else "physical"
+  rows <- DBI::dbGetQuery(con, "SELECT id, name FROM interface WHERE layer = ? ORDER BY name", params = list(layer))
+  stats::setNames(rows$id, rows$name)
+}
+
+render_element_inspector <- function(row, properties, ports, requirements, stereotypes, addable, pinned, ns, hosting = NULL, delete_text = NULL,
+                                     interfaces = character(0), parents = NULL) {
   text_or_blank <- function(x) if (is.na(x)) "" else x
   field <- function(name) change_js(ns("element_change"), list(field = name))
   unreviewed <- row$review_state == "unreviewed"
@@ -141,20 +198,24 @@ render_element_inspector <- function(row, properties, ports, requirements, stere
       )
     },
     labelled("Stereotype", select_tag(stereotypes, text_or_blank(row$stereotype_id), field("stereotype_id"), "None")),
+    if (!is.null(parents)) labelled("Part of", select_tag(parents, text_or_blank(row$parent_id), change_js(ns("move_to"), list()), label = "Part of")),
     labelled("Domain", select_tag(ELEMENT_DOMAINS, text_or_blank(row$domain), field("domain"), "Not set")),
+    render_hosting(hosting, ns),
     labelled("Status", select_tag(ELEMENT_STATUSES, row$status, field("status"))),
     labelled("How many", shiny::tags$input(type = "text", value = row$multiplicity, onchange = field("multiplicity"))),
     labelled("Description", shiny::tags$textarea(rows = 2, onchange = field("description"), text_or_blank(row$description))),
     shiny::tags$div(class = "mb-label", "Properties"),
     if (nrow(properties) > 0L) {
-      shiny::tags$div(class = "mb-prop-grid", unlist(lapply(seq_len(nrow(properties)), function(i) {
+      shiny::tags$div(class = "mb-prop-grid", style = "grid-template-columns: minmax(0,auto) minmax(0,1fr) auto auto", unlist(lapply(seq_len(nrow(properties)), function(i) {
         prop <- properties[i, ]
         is_placeholder <- prop$value_state == "placeholder"
         value <- if (is_placeholder) "" else if (!is.na(prop$num_value)) format(prop$num_value, trim = TRUE, digits = 15) else text_or_blank(prop$text_value)
         list(shiny::tags$span(prop$label),
              shiny::tags$input(type = "text", value = value, placeholder = "[value]", class = if (is_placeholder) "mb-is-placeholder",
                                `aria-label` = prop$label, onchange = change_js(ns("property_change"), list(id = prop$id))),
-             shiny::tags$span(class = "mb-unit", if (is.na(prop$unit)) "" else prop$unit))
+             shiny::tags$span(class = "mb-unit", if (is.na(prop$unit)) "" else prop$unit),
+             shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", `aria-label` = paste("Remove", prop$label, "from", row$name),
+                                onclick = event_js(ns("remove_property"), prop$id), "Remove"))
       }), recursive = FALSE))
     } else {
       shiny::tags$span(class = "mb-caption", "None recorded.")
@@ -165,11 +226,18 @@ render_element_inspector <- function(row, properties, ports, requirements, stere
       shiny::tags$div(class = "mb-prop-grid", style = "grid-template-columns: minmax(0,1fr) auto", unlist(lapply(seq_len(nrow(ports)), function(i) {
         port <- ports[i, ]
         no_iface <- is.na(port$interface)
-        list(shiny::tags$span(class = if (no_iface || !port$connected) "mb-gap",
-                              sprintf("%s · %s · %s%s", port$name, port$direction, if (no_iface) "no interface" else port$interface,
-                                      if (port$connected) "" else " · no connector")),
-             shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", `aria-label` = paste("Remove port", port$name),
-                                onclick = event_js(ns("remove_port"), port$id), "Remove"))
+        change <- function(field) change_js(ns("port_change"), list(id = port$id, field = field))
+        list(shiny::tags$div(
+               class = paste("mb-event-row", if (no_iface || !port$connected) "mb-gap"),
+               shiny::tags$input(type = "text", class = "mono", value = port$name, onchange = change("name"), `aria-label` = paste("Name of port", port$name)),
+               select_tag(c("in", "out", "inout"), port$direction, change("direction"), label = paste("Direction of port", port$name)),
+               select_tag(if (no_iface || port$interface_id %in% interfaces) interfaces else c(interfaces, stats::setNames(port$interface_id, port$interface)),
+                          if (no_iface) "" else port$interface_id, change("interface_id"), "No interface", label = paste("Interface of port", port$name)),
+               if (!port$connected) shiny::tags$span(style = "font-size:12px", "no connector")),
+             confirm_button("Remove", ns("remove_port"), port$id, sprintf("Remove port %s?", port$name),
+                            sprintf("%s loses its port %s%s.", row$name, port$name, if (port$connected) " and the connector on it" else ""),
+                            confirm = "Remove port", class = "mb-btn mb-btn-small") |>
+               htmltools::tagAppendAttributes(`aria-label` = paste("Remove port", port$name)))
       }), recursive = FALSE))
     } else {
       shiny::tags$span(class = "mb-caption", "No ports yet.")
@@ -183,11 +251,18 @@ render_element_inspector <- function(row, properties, ports, requirements, stere
     shiny::tags$label(shiny::tags$input(type = "checkbox", checked = if (pinned) NA,
                                         onchange = sprintf("Shiny.setInputValue('%s', {on: this.checked, n: Math.random()}, {priority: 'event'})", ns("pin"))),
                       " Keep this position on auto-layout"),
-    shiny::tags$div(shiny::tags$button(type = "button", class = "mb-btn", onclick = event_js(ns("delete_element"), row$id), "Delete from the model"))
+    if (isTRUE(attr(parents, "has_parts")) && !is.na(row$parent_id)) {
+      confirm_button(sprintf("Ungroup %s…", row$name), ns("ungroup"), row$id, sprintf("Ungroup %s?", row$name),
+                     sprintf("Its parts move up a level and %s goes, with its own ports and their connectors. Undo puts it all back.", row$name),
+                     confirm = "Ungroup", class = "mb-btn mb-btn-small")
+    },
+    danger_zone(confirm_button(sprintf("Delete %s…", row$name), ns("delete_element"), row$id, sprintf("Delete %s?", row$name),
+                               if (!is.null(delete_text)) delete_text else sprintf("It goes from the model with its %d port%s. Undo brings it back.", nrow(ports), if (nrow(ports) == 1L) "" else "s"),
+                               confirm = "Delete from the model"))
   )
 }
 
-render_connector_inspector <- function(row, ns, carriers = NULL) {
+render_connector_inspector <- function(row, ns, carriers = NULL, properties = NULL, addable = character(0)) {
   shiny::tags$div(
     class = "mb-inspector",
     shiny::tags$div(class = "mono mb-caption", row$id),
@@ -195,11 +270,29 @@ render_connector_inspector <- function(row, ns, carriers = NULL) {
     shiny::tags$div(class = "mono", if (is.na(row$interface)) "no interface" else row$interface),
     labelled("Label", shiny::tags$input(type = "text", value = if (is.na(row$label)) "" else row$label,
                                         onchange = change_js(ns("connector_change"), list(id = row$id)))),
+    # What the connector carries, such as 28 V or 380 W, shown on Flows (review B15).
+    if (!is.null(properties)) {
+      shiny::tagList(
+        shiny::tags$div(class = "mb-label", "Carries"),
+        if (nrow(properties) == 0L) shiny::tags$span(class = "mb-caption", "Nothing recorded."),
+        shiny::tags$div(class = "mb-prop-grid", style = "grid-template-columns: minmax(0,auto) minmax(0,1fr) auto auto", unlist(lapply(seq_len(nrow(properties)), function(i) {
+          prop <- properties[i, ]
+          value <- if (prop$value_state == "placeholder") "" else format(prop$num_value, trim = TRUE, digits = 15)
+          list(shiny::tags$span(prop$label),
+               shiny::tags$input(type = "text", value = value, placeholder = "[value]", `aria-label` = prop$label, onchange = change_js(ns("property_change"), list(id = prop$id))),
+               shiny::tags$span(class = "mb-unit", if (is.na(prop$unit)) "" else prop$unit),
+               shiny::tags$button(type = "button", class = "mb-btn mb-btn-small", `aria-label` = paste("Remove", prop$label), onclick = event_js(ns("remove_property"), prop$id), "Remove"))
+        }), recursive = FALSE)),
+        if (length(addable) > 0L) labelled("Add a quantity", select_tag(addable, "", change_js(ns("add_connector_property"), list(id = row$id)), "Choose…"))
+      )
+    },
     if (!is.null(carriers)) {
       labelled("Carried by", select_tag(carriers$choices, if (length(carriers$selected) == 1L) carriers$selected else "",
                                         change_js(ns("realize"), list(id = row$id)), "Any connector that joins them"))
     },
-    shiny::tags$div(shiny::tags$button(type = "button", class = "mb-btn", onclick = event_js(ns("delete_connector"), row$id), "Delete connector"))
+    danger_zone(confirm_button("Delete connector…", ns("delete_connector"), row$id, "Delete this connector?",
+                               sprintf("%s.%s and %s.%s are no longer connected. Undo brings it back.", row$source_element, row$source_port, row$target_element, row$target_port),
+                               confirm = "Delete connector"))
   )
 }
 
@@ -270,6 +363,7 @@ mod_model_server <- function(id, state, mode = "structure") {
     })
 
     if (mode == "structure") shiny::observe({
+      db_dep(state, "settings")
       views <- DBI::dbGetQuery(con(), "SELECT id, name FROM view_def WHERE view_kind = 'structure' ORDER BY is_builtin DESC, name")
       shiny::updateSelectInput(session, "view", choices = stats::setNames(views$id, views$name), selected = shiny::isolate(view_id()))
     })
@@ -279,7 +373,10 @@ mod_model_server <- function(id, state, mode = "structure") {
       mbdiagram(list(mode = mode, root = view$root, nodes = view$nodes, ports = view$ports, boundary_ports = view$boundary_ports, edges = view$edges,
                      selected = as.list(shiny::isolate(selection()$ids)), tool = shiny::isolate(tool())))
     })
-    shiny::observeEvent(selection(), mbdiagram_send(session, "diagram", "set_selection", list(ids = as.list(selection()$ids))))
+    shiny::observeEvent(selection(), {
+      mbdiagram_send(session, "diagram", "set_selection", list(ids = as.list(selection()$ids)))
+      reveal_column(session, "inspector", length(selection()$ids) > 0L)
+    })
     shiny::observeEvent(tool(), mbdiagram_send(session, "diagram", "set_tool", list(tool = tool())))
 
     tree <- shiny::reactive({
@@ -305,7 +402,11 @@ mod_model_server <- function(id, state, mode = "structure") {
       }))
     })
     output$hint <- shiny::renderText({
-      if (mode == "flows") return("Select a block or connector to see its details.")
+      if (mode == "flows") {
+        return(switch(tool(), select = "Select a block or connector to see its details",
+                      component = "Click the canvas to add outside equipment: something beyond the system boundary, such as an operator or a base station",
+                      TOOL_HINTS[[tool()]]))
+      }
       if (mode == "functional") {
         return(switch(tool(), select = "Drag port to port to connect", component = "Click the canvas to add a function", TOOL_HINTS[[tool()]]))
       }
@@ -315,10 +416,12 @@ mod_model_server <- function(id, state, mode = "structure") {
     output$facts <- shiny::renderUI({
       view <- view_data()
       if (mode == "functional") {
-        return(shiny::tags$div(class = "mb-facts", shiny::tags$span(sprintf("%d functions · %d flows", nrow(view$nodes), nrow(view$edges))),
-                               if (any(view$nodes$unallocated)) shiny::tags$span(class = "mb-gap", sprintf("%d unallocated", sum(view$nodes$unallocated)))))
+        return(shiny::tagList(shiny::tags$span(sprintf("%d functions · %d flows", nrow(view$nodes), nrow(view$edges))),
+                              if (any(view$nodes$unallocated)) shiny::tags$span(class = "mb-gap", sprintf("%d unallocated", sum(view$nodes$unallocated)))))
       }
-      render_facts(view, budget_status(con()), analysis_status(con()), element_gate_findings(con()))
+      gaps <- sum(view$nodes$gap)
+      shiny::tagList(shiny::tags$span(level_count(view)),
+                     if (gaps > 0L) shiny::tags$span(class = "mb-gap", sprintf("%d open gap%s", gaps, if (gaps == 1L) "" else "s")))
     })
     if (mode == "functional") {
       output$realisation <- shiny::renderUI({
@@ -344,15 +447,8 @@ mod_model_server <- function(id, state, mode = "structure") {
       shiny::updateActionButton(session, "undo", disabled = length(stack$undo) == 0L)
       shiny::updateActionButton(session, "redo", disabled = length(stack$redo) == 0L)
     })
-    run_stack <- function(action) {
-      stack <- guarded_edit(action(con(), state$commands()))
-      if (is.null(stack)) return(invisible(NULL))
-      state$commands(stack)
-      invalidate_db(state, c("model", "spec", "behavior"))
-      redraw(redraw() + 1L)
-    }
-    shiny::observeEvent(input$undo, run_stack(undo_command))
-    shiny::observeEvent(input$redo, run_stack(redo_command))
+    shiny::observeEvent(input$undo, run_command(state, undo_command, redraw))
+    shiny::observeEvent(input$redo, run_command(state, redo_command, redraw))
     shiny::observeEvent(input$auto_layout, mbdiagram_send(session, "diagram", "auto_layout"))
 
     shiny::observeEvent(input$group, {
@@ -377,8 +473,8 @@ mod_model_server <- function(id, state, mode = "structure") {
         event$type,
         select = selection(list(kind = event$kind, ids = as.character(unlist(event$ids)))),
         open = {
-          # Functions have no levels to open.
-          if (mode != "functional") {
+          # Functions and outside equipment have no levels to open.
+          if (mode != "functional" && !identical(DBI::dbGetQuery(con(), "SELECT kind FROM element WHERE id = ?", params = list(event$id))$kind, "external")) {
             root(event$id)
             selection(list(kind = "none", ids = character(0)))
           }
@@ -394,7 +490,10 @@ mod_model_server <- function(id, state, mode = "structure") {
           if (is.null(written)) redraw(redraw() + 1L)
         },
         add_component = {
-          fields <- if (mode == "functional") list(kind = "function", name = "New function") else list(kind = "component", name = "New component", parent_id = current_root())
+          fields <- switch(mode,
+                           functional = list(kind = "function", name = "New function"),
+                           flows = list(kind = "external", name = "New outside equipment"),
+                           list(kind = "component", name = "New component", parent_id = current_root()))
           written <- model_edit(state, write_element(con(), fields = fields), "add component")
           if (!is.null(written)) {
             save_layout(con(), view_id(), layout_items(data.frame(id = written$id, x = event$x, y = event$y)))
@@ -402,18 +501,22 @@ mod_model_server <- function(id, state, mode = "structure") {
             select_element(written$id)
           }
         },
-        add_port = ask_port(event$element, event$side)
+        add_port = ask_port(event$element, event$side),
+        undo = run_command(state, undo_command, redraw),
+        redo = run_command(state, redo_command, redraw)
       )
     })
 
     ask_port <- function(element, side = NULL) {
       pending_port(list(element = element, side = side))
-      interfaces <- DBI::dbGetQuery(con(), "SELECT id, name FROM interface ORDER BY layer DESC, name")
+      kind <- DBI::dbGetQuery(con(), "SELECT kind FROM element WHERE id = ?", params = list(element))$kind
+      choices <- port_interface_choices(con(), kind)
+      interfaces <- data.frame(id = unname(choices), name = names(choices))
       shiny::showModal(shiny::modalDialog(
         title = "Add a port",
         shiny::textInput(ns("port_name"), "Name"),
-        shiny::selectInput(ns("port_direction"), "Direction", choices = c("in", "out", "inout")),
-        shiny::selectInput(ns("port_interface"), "Interface", choices = with_blank(stats::setNames(interfaces$id, interfaces$name), "None yet")),
+        shiny::selectInput(ns("port_direction"), "Direction", choices = c("in", "out", "inout"), selectize = FALSE),
+        shiny::selectInput(ns("port_interface"), "Interface", choices = with_blank(stats::setNames(interfaces$id, interfaces$name), "None yet"), selectize = FALSE),
         footer = shiny::tagList(shiny::modalButton("Cancel"), shiny::actionButton(ns("port_confirm"), "Add port", class = "mb-btn mb-btn-primary"))
       ))
     }
@@ -435,8 +538,20 @@ mod_model_server <- function(id, state, mode = "structure") {
     output$inspector <- shiny::renderUI({
       db_dep(state, "model")
       chosen <- selection()
-      if (length(chosen$ids) == 0L) return(shiny::tags$p(class = "mb-caption", "Select a block or connector to see its details."))
+      if (length(chosen$ids) == 0L || !chosen$kind %in% c("element", "connector")) {
+        if (mode == "functional") return(shiny::tags$p(class = "mb-caption", "Select a function or flow to see its details."))
+        return(shiny::tagList(shiny::tags$p(class = "mb-caption", "Select a block or connector to see its details."),
+                              render_facts(view_data(), budget_status(con()), analysis_status(con()), element_gate_findings(con()))))
+      }
       if (length(chosen$ids) > 1L) return(shiny::tags$p(class = "mb-caption", sprintf("%d components selected.", length(chosen$ids))))
+      # The selection is shared across views; a function belongs to Functional, the rest to the others (§2.14).
+      if (chosen$kind == "element") {
+        picked <- read_entity(con(), "element", chosen$ids)
+        if (!is.null(picked) && (picked$kind == "function") != (mode == "functional")) {
+          return(shiny::tags$p(class = "mb-caption", sprintf("%s is selected in %s. Select something here to see its details.",
+                                                             picked$name, if (picked$kind == "function") "Functional" else "Structure")))
+        }
+      }
       if (chosen$kind == "connector") {
         row <- connector_detail(con(), chosen$ids)
         if (nrow(row) == 0L) return(NULL)
@@ -446,7 +561,12 @@ mod_model_server <- function(id, state, mode = "structure") {
           carriers <- list(choices = stats::setNames(physical$id, sprintf("%s · %s", physical$id, physical$label)),
                            selected = DBI::dbGetQuery(con(), "SELECT target_id FROM link WHERE link_type = 'realized_by' AND source_id = ?", params = list(chosen$ids))$target_id)
         }
-        return(render_connector_inspector(row, ns, carriers))
+        quantities <- if (mode == "functional") NULL else DBI::dbGetQuery(con(), "
+          SELECT v.id, d.label, v.value_state, v.num_value, coalesce(v.unit, d.unit) AS unit FROM property_value v JOIN property_def d ON d.id = v.property_def_id
+           WHERE v.owner_kind = 'connector' AND v.owner_id = ? ORDER BY d.label", params = list(row$id))
+        numbers <- DBI::dbGetQuery(con(), "SELECT id, label FROM property_def WHERE value_type = 'number' ORDER BY label")
+        numbers <- numbers[!numbers$label %in% quantities$label, , drop = FALSE]
+        return(render_connector_inspector(row, ns, carriers, quantities, stats::setNames(numbers$id, numbers$label)))
       }
       if (chosen$kind != "element") return(NULL)
       row <- read_entity(con(), "element", chosen$ids)
@@ -458,8 +578,21 @@ mod_model_server <- function(id, state, mode = "structure") {
       addable <- defs[!defs$id %in% held, , drop = FALSE]
       stored <- layout_rows(con(), view_id(), chosen$ids)
       pinned <- nrow(stored) == 1L && grepl('"pinned":true', stored$extra_json, fixed = TRUE)
+      hosting <- if (row$kind == "component" && identical(row$domain, "sw")) {
+        hosts <- host_choices(con(), row$id)
+        list(kind = "software", choices = stats::setNames(hosts$id, hosts$name), selected = software_host(con(), row$id)$host_id)
+      } else if (row$kind %in% c("component", "external")) {
+        list(kind = "host", software = hosted_software(con(), row$id))
+      }
       details <- render_element_inspector(row, properties, element_ports(con(), chosen$ids), element_requirements(con(), chosen$ids),
-                                          stats::setNames(stereotypes$id, stereotypes$name), stats::setNames(addable$id, addable$label), pinned, ns)
+                                          stats::setNames(stereotypes$id, stereotypes$name), stats::setNames(addable$id, addable$label), pinned, ns, hosting,
+                                          delete_effects_text(delete_effects(con(), "element", row$id)),
+                                          interfaces = port_interface_choices(con(), row$kind),
+                                          parents = if (row$kind == "component" && !is.na(row$parent_id)) {
+                                            targets <- move_targets(con(), row$id)
+                                            structure(stats::setNames(targets$id, targets$name),
+                                                      has_parts = nrow(DBI::dbGetQuery(con(), "SELECT 1 FROM element WHERE parent_id = ?", params = list(row$id))) > 0L)
+                                          })
       if (row$kind != "function") return(details)
       db_dep(state, "spec")
       db_dep(state, "ai")
@@ -482,7 +615,8 @@ mod_model_server <- function(id, state, mode = "structure") {
       } else if (!nzchar(value)) {
         value <- NA_character_
       }
-      model_edit(state, write_element(con(), selected_id(), stats::setNames(list(value), change$field)), "edit")
+      model_edit(state, write_element(con(), selected_id(), stats::setNames(list(value), change$field)),
+                 sprintf("%s of %s", gsub("_", " ", change$field), read_entity(con(), "element", selected_id())$name))
     })
     shiny::observeEvent(input$property_change, {
       model_edit(state, set_property_value(con(), input$property_change$id, input$property_change$value), "set value")
@@ -532,6 +666,27 @@ mod_model_server <- function(id, state, mode = "structure") {
     shiny::observeEvent(input$keep_link, {
       written <- model_edit(state, keep_candidate(con(), input$keep_link$id, input$keep_link$handle, input$keep_link$note), "link")
       if (!is.null(written)) invalidate_db(state, "ai")
+    })
+    shiny::observeEvent(input$host, model_edit(state, host_software(con(), selected_id(), input$host$value), "runs on"))
+    shiny::observeEvent(input$move_to, {
+      # Redrawn either way: a refused move puts the select back.
+      model_edit(state, move_element(con(), selected_id(), input$move_to$value), "move")
+      redraw(redraw() + 1L)
+    })
+    shiny::observeEvent(input$ungroup, {
+      if (!is.null(model_edit(state, ungroup_element(con(), input$ungroup), "ungroup"))) {
+        selection(list(kind = "none", ids = character(0)))
+        redraw(redraw() + 1L)
+      }
+    })
+    shiny::observeEvent(input$add_connector_property, {
+      if (nzchar(input$add_connector_property$value)) {
+        model_edit(state, add_property_to_connector(con(), input$add_connector_property$id, input$add_connector_property$value), "add quantity")
+      }
+    })
+    shiny::observeEvent(input$remove_property, model_edit(state, delete_entity(con(), "property_value", input$remove_property), "remove property"))
+    shiny::observeEvent(input$port_change, {
+      if (is.null(model_edit(state, save_port(con(), input$port_change$id, input$port_change$field, input$port_change$value), "edit port"))) redraw(redraw() + 1L)
     })
     shiny::observeEvent(input$realize, {
       model_edit(state, realize_flow(con(), input$realize$id, input$realize$value), "realise")

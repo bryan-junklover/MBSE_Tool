@@ -88,3 +88,23 @@ test_that("the stakeholder page holds plain words and the status chips", {
     expect_identical(state$nav()$tab, "Review queue")
   })
 })
+
+test_that("impact rows group under the changed item and fold three or more hops", {
+  items <- data.frame(kind = "x", id = c("a", "b", "c"), label = c("Near", "Far", "Mass budget"), hops = c(1L, 3L, 1L),
+                      path = c("Power System · Battery capacity → Near", "Power System · Battery capacity → X → Y → Far", "Power System · Mass → Mass budget"),
+                      stale = NA_character_, significance = c(NA, "High", NA), stringsAsFactors = FALSE)
+  html <- html_of(render_impact_table(items))
+  expect_match(html, "Power System · Battery capacity</span>", fixed = TRUE)
+  expect_match(html, "Power System · Mass</span>", fixed = TRUE)
+  expect_match(html, "1 more, three or more hops away", fixed = TRUE)
+  expect_match(html, ">→ Near<", fixed = TRUE)
+})
+
+test_that("the create button says how many blockers stand in the way", {
+  state <- local_sample_state()
+  shiny::testServer(mod_baselines_server, args = list(state = state), {
+    expect_match(html_of(output$create_button$html), "8 blockers", fixed = TRUE)
+    session$setInputs(go = list(place = "spec"))
+    expect_identical(state$nav()$tab, "Specification")
+  })
+})

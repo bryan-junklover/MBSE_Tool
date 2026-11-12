@@ -36,8 +36,8 @@ sim_start <- function(machine, start_state = NULL) {
   list(current = current, clock = 0, variables = initial_variables(machine), trace = list(), status = "ok", error = NA_character_)
 }
 
-sim_log <- function(sim, from, to, event, note, level = "normal") {
-  sim$trace[[length(sim$trace) + 1L]] <- list(t = sim$clock, from = from, to = to, event = event, note = note, level = level)
+sim_log <- function(sim, from, to, event, note, level = "normal", transition = NA_character_) {
+  sim$trace[[length(sim$trace) + 1L]] <- list(t = sim$clock, from = from, to = to, event = event, note = note, level = level, transition = transition)
   sim
 }
 
@@ -54,7 +54,17 @@ sim_fire <- function(machine, sim, event_name, set = list()) {
   if (nrow(event) == 0L) return(sim_fail(sim, machine, event_name, sprintf("\"%s\" isn't an event of this state machine.", event_name)))
   for (name in names(set)) {
     if (!name %in% machine$variables$name) return(sim_fail(sim, machine, event_name, sprintf("\"%s\" isn't a variable.", name)))
-    sim$variables[[name]] <- set[[name]]
+    # A set value takes its variable's type, so 1 from JSON is the number 1 and "true" a bool (review C10).
+    type <- machine$variables$value_type[machine$variables$name == name]
+    value <- set[[name]]
+    converted <- switch(type,
+                        number = suppressWarnings(as.numeric(value)),
+                        bool = if (is.logical(value)) value else if (tolower(as.character(value)) %in% c("true", "false")) tolower(as.character(value)) == "true" else NA,
+                        as.character(value))
+    if (length(converted) != 1L || is.na(converted)) {
+      return(sim_fail(sim, machine, event_name, sprintf("%s is a %s, so it can't be set to %s.", name, type, paste(format(value), collapse = ", "))))
+    }
+    sim$variables[[name]] <- converted
   }
   tryCatch({
     from <- machine$transitions[machine$transitions$from_state_id == sim$current & machine$transitions$event_id == event$id, , drop = FALSE]
@@ -74,7 +84,7 @@ sim_fire <- function(machine, sim, event_name, set = list()) {
     sim$current <- top$to_state_id
     target <- machine$states[machine$states$id == top$to_state_id, , drop = FALSE]
     sim$variables <- apply_effect(target$entry_effect, sim$variables, machine$property)
-    sim_log(sim, here, target$name, event_name, sprintf("%s → %s on %s", here, target$name, event_name))
+    sim_log(sim, here, target$name, event_name, sprintf("%s → %s on %s", here, target$name, event_name), transition = top$id)
   }, modelbench_sim_error = function(e) sim_fail(sim, machine, event_name, conditionMessage(e)),
   modelbench_refused = function(e) sim_fail(sim, machine, event_name, conditionMessage(e)))
 }

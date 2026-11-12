@@ -35,6 +35,7 @@ test_that("state machine content joins the context of an assertion's requirement
   ids <- vapply(verification_context(con, "SYS-012"), function(entry) entry$id, "")
   expect_true(all(c("SM-001", "S-RTH", "T-05", "E-04", "VAR-1") %in% ids))
   write_test_case(con, "TC-X", list(name = "Sim", method = "simulation"))
+  write_link(con, fields = list(link_type = "verified_by", source_kind = "requirement", source_id = "SYS-012", target_kind = "test_case", target_id = "TC-X"))
   write_verification_record(con, "SYS-012", "TC-X", "pass", "engineer")
   expect_identical(nrow(stale_evidence(con)[stale_evidence(con)$requirement_id == "SYS-012", ]), 0L)
   write_sm_transition(con, "T-05", list(hold_s = 4))
@@ -217,4 +218,11 @@ test_that("hand links may leave the rationale empty, and test cases link themsel
   expect_error(add_test_case(con, "SYS-021", " ", "test"), class = "modelbench_refused")
   write_verification_record(con, "SYS-021", case$id, "pass", "engineer", evidence_ref = "R1")
   expect_identical(requirement_evidence(con, "SYS-021")$result, "pass")
+})
+
+test_that("a requirement with no test cases has empty evidence, not an error", {
+  con <- local_built_sample()
+  evidence <- requirement_evidence(con, "STK-001")
+  expect_identical(nrow(evidence), 0L)
+  expect_true(all(c("result", "recorded_at", "stale") %in% names(evidence)))
 })
